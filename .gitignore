@@ -1,0 +1,7 @@
+# Kunci penandatanganan: JANGAN di-commit
+*.keystore
+*.jks
+signing-password.txt
+# Hasil build
+Dompet_Ivan_Project/build/
+*.idsig
