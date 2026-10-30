@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 
-/** Database lokal (SQLite). Nama berkas tetap "dompet.db" agar data v1–v2.5 ikut termigrasi. */
+/** Database lokal (SQLite). Nama berkas tetap "dompet.db" agar data v1–3.5 ikut termigrasi. */
 final class Db extends SQLiteOpenHelper {
   private final HashMap<String, String> iconCache = new HashMap<>();
 
@@ -29,13 +29,26 @@ final class Db extends SQLiteOpenHelper {
     exec(d, Schema.V2);
     upgradeTo3(d);
     upgradeTo4(d);
+    exec(d, Schema.V5);
   }
 
   @Override public void onUpgrade(SQLiteDatabase d, int old, int now) {
     if (old < 2) exec(d, Schema.V2);
     if (old < 3) upgradeTo3(d);
     if (old < 4) upgradeTo4(d);
+    if (old < 5) exec(d, Schema.V5);
   }
+
+  /** Mata uang aktif dibaca setiap kali database dibuka (juga dari alarm/notifikasi di latar belakang). */
+  @Override public void onOpen(SQLiteDatabase d) { applyCurrency(d); }
+
+  static void applyCurrency(SQLiteDatabase d) {
+    Cursor c = d.rawQuery("SELECT value FROM settings WHERE key='currency'", null);
+    try { Fmt.setCurrency(c.moveToFirst() ? c.getString(0) : "IDR"); } finally { c.close(); }
+  }
+
+  /** Dipanggil setelah data diganti seluruhnya (pulihkan/reset). */
+  void reloaded() { iconCache.clear(); applyCurrency(getReadableDatabase()); }
 
   private static void exec(SQLiteDatabase d, String[] sql) { for (String s : sql) d.execSQL(s); }
 
@@ -273,7 +286,84 @@ final class Db extends SQLiteOpenHelper {
     return out;
   }
 
+  /** Hapus permanen (dipakai "Urungkan" setelah mencatat transaksi baru). */
   void delete(long id) { getWritableDatabase().delete("tx", "id=?", a(id)); }
+
+  // ---------------- Tempat sampah (4.0) ----------------
+
+  static final int TRASH_DAYS = 30;
+
+  /** Memindahkan transaksi ke tempat sampah. Mengembalikan id baris sampah (untuk Urungkan). */
+  long moveToTrash(Tx t) {
+    SQLiteDatabase d = getWritableDatabase();
+    d.beginTransaction();
+    try {
+      ContentValues v = new ContentValues();
+      v.put("deleted", Fmt.today()); v.put("date", t.date); v.put("type", t.type); v.put("amount", t.amount);
+      v.put("category", t.cat); v.put("note", t.note == null ? "" : t.note); v.put("account", t.account); v.put("to_account", t.toAccount);
+      long id = d.insertOrThrow("trash", null, v);
+      d.delete("tx", "id=?", a(t.id));
+      d.setTransactionSuccessful();
+      return id;
+    } finally { d.endTransaction(); }
+  }
+
+  static final class Trashed { long id; String deleted; Tx tx; }
+
+  ArrayList<Trashed> trash() {
+    ArrayList<Trashed> out = new ArrayList<>();
+    Cursor c = getReadableDatabase().query("trash", new String[]{"id", "date", "type", "amount", "category", "note", "account", "to_account", "deleted"}, null, null, null, null, "deleted DESC,id DESC", "500");
+    try {
+      while (c.moveToNext()) {
+        Trashed x = new Trashed();
+        x.tx = read(c);
+        x.id = x.tx.id; x.tx.id = 0;
+        x.deleted = c.getString(8);
+        out.add(x);
+      }
+    } finally { c.close(); }
+    return out;
+  }
+
+  long trashCount() { return scalar("SELECT COUNT(*) FROM trash"); }
+
+  long count(String table) { return android.database.DatabaseUtils.queryNumEntries(getReadableDatabase(), table); }
+
+  /**
+   * Mengembalikan transaksi dari tempat sampah. Akun yang sudah dihapus diganti akun utama; akun yang
+   * diarsipkan dibuka lagi; kategori yang sudah dihapus dibuat ulang. Mengembalikan transaksi baru, atau
+   * null bila transfer tidak bisa dipulihkan (akun tujuan sama/hilang).
+   */
+  Tx restoreTrash(long trashId) {
+    Trashed found = null;
+    Cursor c = getReadableDatabase().query("trash", new String[]{"id", "date", "type", "amount", "category", "note", "account", "to_account", "deleted"}, "id=?", a(trashId), null, null, null);
+    try { if (c.moveToFirst()) { found = new Trashed(); found.tx = read(c); found.id = trashId; } } finally { c.close(); }
+    if (found == null) return null;
+    Tx t = found.tx;
+    t.id = 0;
+    if (account(t.account) == null) t.account = 1;
+    if (t.type == Model.TRANSFER && (account(t.toAccount) == null || t.toAccount == t.account)) return null;
+    SQLiteDatabase d = getWritableDatabase();
+    d.beginTransaction();
+    try {
+      ContentValues v = new ContentValues();
+      v.put("archived", 0);
+      d.update("accounts", v, "id=? OR id=?", a(t.account, t.type == Model.TRANSFER ? t.toAccount : t.account));
+      if (t.type != Model.TRANSFER) insertCategory(d, t.type, t.cat, "");
+      t.id = put(t);
+      d.delete("trash", "id=?", a(trashId));
+      d.setTransactionSuccessful();
+    } finally { d.endTransaction(); }
+    iconCache.clear();
+    return t;
+  }
+
+  void purgeTrash(long trashId) { getWritableDatabase().delete("trash", "id=?", a(trashId)); }
+
+  void emptyTrash() { getWritableDatabase().delete("trash", null, null); }
+
+  /** Menghapus permanen isi tempat sampah yang lebih tua dari TRASH_DAYS hari. */
+  int purgeOldTrash() { return getWritableDatabase().delete("trash", "deleted<?", a(Fmt.addDays(Fmt.today(), -TRASH_DAYS))); }
 
   long txCount() { return scalar("SELECT COUNT(*) FROM tx"); }
 
@@ -368,47 +458,54 @@ final class Db extends SQLiteOpenHelper {
 
   ArrayList<Bill> bills() {
     ArrayList<Bill> out = new ArrayList<>();
-    Cursor c = getReadableDatabase().query("bills", new String[]{"id", "name", "amount", "kind", "due", "cycles", "paid", "anchor"}, "cycles=0 OR paid<cycles", null, null, null, "due ASC");
+    Cursor c = getReadableDatabase().query("bills", new String[]{"id", "name", "amount", "kind", "due", "cycles", "paid", "anchor", "freq"}, "cycles=0 OR paid<cycles", null, null, null, "due ASC");
     try {
       while (c.moveToNext()) {
         Bill b = new Bill();
         b.id = c.getLong(0); b.name = c.getString(1); b.amount = c.getLong(2); b.kind = c.getString(3);
-        b.due = c.getString(4); b.cycles = c.getInt(5); b.paid = c.getInt(6); b.anchor = c.getInt(7);
+        b.due = c.getString(4); b.cycles = c.getInt(5); b.paid = c.getInt(6); b.anchor = c.getInt(7); b.freq = c.getInt(8);
         out.add(b);
       }
     } finally { c.close(); }
     return out;
   }
 
-  void putBill(long id, String name, long amount, String kind, String due, int cycles, int paid, int anchor) {
+  void putBill(long id, String name, long amount, String kind, String due, int cycles, int paid, int anchor, int freq) {
     ContentValues v = new ContentValues();
     v.put("name", name); v.put("amount", amount); v.put("kind", kind); v.put("due", due); v.put("cycles", cycles); v.put("paid", paid); v.put("anchor", anchor);
+    v.put("freq", Bill.validFreq(freq) ? freq : Bill.FREQ_MONTH);
     if (id == 0) getWritableDatabase().insertOrThrow("bills", null, v);
     else getWritableDatabase().update("bills", v, "id=?", a(id));
   }
 
   void deleteBill(long id) { getWritableDatabase().delete("bills", "id=?", a(id)); }
 
-  /** Mencatat pembayaran tagihan sebagai pengeluaran kategori "Tagihan" dan memajukan jatuh tempo sebulan. */
-  void payBill(Bill b, long account) {
+  /** Mencatat pembayaran tagihan sebagai pengeluaran kategori "Tagihan" dan memajukan jatuh tempo satu siklus. */
+  Tx payBill(Bill b, long account) {
+    Tx t = new Tx();
     SQLiteDatabase d = getWritableDatabase();
     d.beginTransaction();
     try {
-      Tx t = new Tx();
       t.date = Fmt.today(); t.type = Model.EXPENSE; t.amount = b.amount; t.cat = "Tagihan"; t.note = b.kind + ": " + b.name; t.account = account;
-      put(t);
+      t.id = put(t);
       insertCategory(d, 0, "Tagihan", "🧾");
       ContentValues v = new ContentValues();
-      v.put("paid", b.paid + 1); v.put("due", Fmt.nextMonthly(b.due, b.anchorDay())); v.put("anchor", b.anchorDay());
+      v.put("paid", b.paid + 1); v.put("due", b.next(b.due)); v.put("anchor", b.anchorDay());
       d.update("bills", v, "id=?", a(b.id));
       d.setTransactionSuccessful();
     } finally { d.endTransaction(); }
+    return t;
   }
 
+  /** Total tagihan yang jatuh tempo sampai n hari lagi (tagihan mingguan bisa muncul beberapa kali). */
   long upcomingTotal(int days) {
     String until = Fmt.addDays(Fmt.today(), days);
     long n = 0;
-    for (Bill b : bills()) if (b.due.compareTo(until) <= 0) n += b.amount;
+    for (Bill b : bills()) {
+      String due = b.due;
+      int left = b.cycles > 0 ? b.cycles - b.paid : Integer.MAX_VALUE, guard = 0;
+      while (left-- > 0 && Fmt.validIso(due) && due.compareTo(until) <= 0 && guard++ < 60) { n += b.amount; due = b.next(due); }
+    }
     return n;
   }
 
@@ -576,5 +673,88 @@ final class Db extends SQLiteOpenHelper {
     v.put("key", key);
     v.put("value", value instanceof Boolean ? (((Boolean) value) ? "1" : "0") : String.valueOf(value));
     getWritableDatabase().insertWithOnConflict("settings", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+  }
+
+  // ---------------- Reset & mata uang (4.0) ----------------
+
+  /** Tabel yang dikosongkan saat reset keuangan (urutan tidak penting; semua dalam satu transaksi). */
+  static final String[] DATA_TABLES = {"tx", "trash", "budgets", "bills", "goals", "contributions", "debts", "wishes"};
+  static final String[] STRUCTURE_TABLES = {"categories", "templates", "accounts"};
+
+  /**
+   * Mengembalikan keuangan ke nol seperti instalasi baru: semua transaksi, anggaran, tagihan, target, utang,
+   * wishlist, tempat sampah, batas kontrol, asumsi & skenario simulasi dihapus. Nama panggilan selalu
+   * dipertahankan; mata uang dan daftar akun/kategori/template hanya bila diminta.
+   */
+  void resetAll(boolean keepStructure, boolean keepCurrency) {
+    String name = setting("name", ""), currency = setting("currency", "IDR");
+    SQLiteDatabase d = getWritableDatabase();
+    d.beginTransaction();
+    try {
+      for (String t : DATA_TABLES) d.delete(t, null, null);
+      d.delete("settings", null, null);
+      if (!keepStructure) for (String t : STRUCTURE_TABLES) d.delete(t, null, null);
+      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','trash','bills','goals','contributions','debts','wishes')");
+      if (!keepStructure) d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('templates','accounts')");
+      d.execSQL("INSERT OR IGNORE INTO accounts(id,name,icon,color,archived) VALUES(1,'Dompet utama','👛',0,0)");
+      if (keepStructure) { ContentValues v = new ContentValues(); v.put("archived", 0); d.update("accounts", v, "id=1", null); }
+      seedCategories(d);
+      seedIcons(d);
+      if (!name.isEmpty()) { ContentValues v = new ContentValues(); v.put("key", "name"); v.put("value", name); d.insert("settings", null, v); }
+      if (keepCurrency && !currency.equals("IDR")) { ContentValues v = new ContentValues(); v.put("key", "currency"); v.put("value", currency); d.insert("settings", null, v); }
+      d.setTransactionSuccessful();
+    } finally { d.endTransaction(); }
+    reloaded();
+  }
+
+  /** Kolom nominal per tabel yang ikut dikonversi saat mata uang diganti. */
+  static final String[][] MONEY_COLUMNS = {
+    {"tx", "amount"}, {"trash", "amount"}, {"budgets", "lim"}, {"bills", "amount"}, {"goals", "target"},
+    {"contributions", "amount"}, {"templates", "amount"}, {"debts", "amount"}, {"debts", "paid"}, {"wishes", "price"}
+  };
+
+  /** Pengaturan bernilai nominal (batas kontrol). Skenario simulasi dikonversi terpisah. */
+  static final String[] MONEY_SETTINGS = {"limit_month", "limit_week", "limit_day", "unusual_min"};
+
+  /**
+   * Mengganti mata uang. rate = nilai 1 unit mata uang lama dalam mata uang baru (1 untuk "hanya ganti
+   * simbol": angka utama tetap, hanya digit sen yang menyesuaikan). Semua nominal dikonversi dalam satu
+   * transaksi; bila ada yang melampaui batas, tidak ada yang diubah dan pesan galat dikembalikan.
+   */
+  String changeCurrency(String code, double rate) {
+    Fmt.Currency from = Fmt.cur, to = Fmt.currency(code);
+    if (!(rate > 0) || Double.isInfinite(rate)) return "Kurs tidak valid";
+    SQLiteDatabase d = getWritableDatabase();
+    d.beginTransaction();
+    try {
+      for (String[] mc : MONEY_COLUMNS) {
+        Cursor c = d.query(mc[0], new String[]{"rowid", mc[1]}, null, null, null, null, null);
+        try {
+          while (c.moveToNext()) {
+            long v = c.getLong(1), n = Fmt.convert(v, from.dec, to.dec, rate, Fmt.MAX_AMOUNT);
+            if (n == Fmt.OVERFLOW) return "Nominal " + Fmt.rp(v) + " menjadi terlalu besar setelah dikonversi. Periksa kurs.";
+            if (n == v) continue;
+            ContentValues cv = new ContentValues();
+            cv.put(mc[1], n);
+            d.update(mc[0], cv, "rowid=?", a(c.getLong(0)));
+          }
+        } finally { c.close(); }
+      }
+      // Utang yang lunas tetap lunas walau pembulatan berbeda.
+      d.execSQL("UPDATE debts SET paid=amount WHERE paid>amount");
+      for (String key : MONEY_SETTINGS) {
+        long v = settingLong(key, 0);
+        if (v > 0) { long n = Fmt.convert(v, from.dec, to.dec, rate, Fmt.MAX_AMOUNT); set(key, n == Fmt.OVERFLOW ? 0 : n); }
+      }
+      Cursor c = d.rawQuery("SELECT key,value FROM settings WHERE key='sim_cur' OR key='sim_ev' OR key GLOB 'sim_s[0-9]' OR key GLOB 'sim_s[0-9]e'", null);
+      ArrayList<String[]> sims = new ArrayList<>();
+      try { while (c.moveToNext()) sims.add(new String[]{c.getString(0), c.getString(1)}); } finally { c.close(); }
+      for (String[] kv : sims) set(kv[0], kv[0].endsWith("e") || kv[0].equals("sim_ev")
+        ? Simulator.convertEvents(kv[1], from.dec, to.dec, rate) : Simulator.convertInput(kv[1], from.dec, to.dec, rate));
+      if (to.code.equals("IDR")) d.delete("settings", "key='currency'", null); else set("currency", to.code);
+      d.setTransactionSuccessful();
+    } finally { d.endTransaction(); }
+    Fmt.setCurrency(to.code);
+    return null;
   }
 }

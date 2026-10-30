@@ -226,7 +226,7 @@ final class Analytics {
         r.dailyExp[idx] += t.amount;
         r.weekdayTotal[Fmt.weekday(t.date)] += t.amount;
         expenses.add(t);
-        if (t.amount < 50_000) { r.smallCount++; r.smallTotal += t.amount; }
+        if (t.amount < Fmt.th(50_000)) { r.smallCount++; r.smallTotal += t.amount; }
         String key = t.note.trim().toLowerCase(Locale.ROOT);
         if (!key.isEmpty()) {
           NoteStat s = notes.get(key);
@@ -335,7 +335,7 @@ final class Analytics {
     if (!changes.isEmpty()) {
       Object[] c = changes.get(0);
       long now = (Long) c[1], before = (Long) c[2];
-      if (before > 0 && now - before > before / 4 && now - before >= 50_000)
+      if (before > 0 && now - before > before / 4 && now - before >= Fmt.th(50_000))
         out.add(new Insight(WARN, "⬆️", c[0] + " naik paling tajam", Fmt.rp(before) + " → " + Fmt.rp(now) + " (+" + Fmt.pct((double) (now - before) / before) + ")."));
     }
     if (r.elapsed >= 14 && r.expense > 0) {
@@ -350,7 +350,7 @@ final class Analytics {
       out.add(new Insight(INFO, "🔁", "\"" + n.note + "\" muncul " + n.count + "×", "Total " + Fmt.rp(n.total) + ". Separuh frekuensinya saja sudah menghemat " + Fmt.rp(n.total / 2) + "."));
     }
     if (r.expense > 0 && r.smallCount >= 8 && r.smallTotal * 100 / r.expense >= 15)
-      out.add(new Insight(WARN, "💧", "Kebocoran kecil " + Fmt.rp(r.smallTotal), r.smallCount + " transaksi di bawah Rp50rb = " + Fmt.pct((double) r.smallTotal / r.expense) + " pengeluaran. Kecil satu per satu, besar jika dijumlah."));
+      out.add(new Insight(WARN, "💧", "Kebocoran kecil " + Fmt.rp(r.smallTotal), r.smallCount + " transaksi di bawah " + Fmt.compact(Fmt.th(50_000)) + " = " + Fmt.pct((double) r.smallTotal / r.expense) + " pengeluaran. Kecil satu per satu, besar jika dijumlah."));
     if (r.elapsed >= 7 && r.noSpendDays > 0)
       out.add(new Insight(r.noSpendDays * 4 >= r.elapsed ? GOOD : INFO, "🧘", r.noSpendDays + " hari tanpa pengeluaran", "Dari " + r.elapsed + " hari yang sudah berjalan pada periode ini."));
     if (x != null) {

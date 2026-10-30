@@ -122,7 +122,7 @@ final class Forecast {
       ArrayList<Long> days = new ArrayList<>();
       for (Tx t : g) { amounts.add(t.amount); days.add((long) Fmt.day(t.date)); }
       long med = medianOf(amounts);
-      if (g.get(0).type == Model.EXPENSE && med < 10_000) continue;
+      if (g.get(0).type == Model.EXPENSE && med < Fmt.th(10_000)) continue;
       int stable = 0;
       for (long a : amounts) if (a * 100 >= med * 65 && a * 100 <= med * 135) stable++;
       if (stable * 4 < n * 3) continue;
@@ -185,7 +185,7 @@ final class Forecast {
         it.source = b.kind == null || b.kind.isEmpty() ? "Tagihan" : b.kind;
         out.add(it);
         left--;
-        due = Fmt.nextMonthly(due, b.anchorDay());
+        due = b.next(due);
       }
     }
     if (debts != null) for (Debt x : debts) {
@@ -235,7 +235,7 @@ final class Forecast {
     long[] runRate(List<Bill> bills) {
       double exp = avgExpPerDay() * DAYS_PER_MONTH, inc = irregularInc * DAYS_PER_MONTH;
       for (Recurring r : recurring) if (r.type == Model.INCOME) inc += r.amount; else exp += r.amount;
-      if (bills != null) for (Bill b : bills) if (b.cycles == 0 || b.paid < b.cycles) exp += b.amount;
+      if (bills != null) for (Bill b : bills) if (b.cycles == 0 || b.paid < b.cycles) exp += b.perMonth();
       return new long[]{round(inc), round(exp)};
     }
   }
@@ -271,7 +271,7 @@ final class Forecast {
     ArrayList<Long> amounts = new ArrayList<>();
     for (Tx t : txs)
       if (flow(t) && t.type == Model.EXPENSE && t.date.compareTo(start) >= 0 && t.date.compareTo(end) <= 0 && !excluded(t, recKeys, billNotes)) amounts.add(t.amount);
-    b.threshold = Analytics.unusualThreshold(amounts, 250_000);
+    b.threshold = Analytics.unusualThreshold(amounts, Fmt.th(250_000));
 
     long[] daily = new long[L];
     double irrExp = 0, irrExpSq = 0, inc = 0, incSq = 0;
@@ -568,6 +568,7 @@ final class Forecast {
       if (recentTx != null) for (Tx t : recentTx) if (t.type == Model.EXPENSE && t.date.compareTo(since) >= 0 && norm(t.note).equals(note)) { inHistory = true; break; }
       int left = bl.cycles > 0 ? bl.cycles - bl.paid : Integer.MAX_VALUE;
       if (left <= 0) continue;
+      if (!bl.monthly()) { nonMonthly(m, bl, left, inHistory || (n < 3 && weekly(bl)), cur, adjE); continue; }
       // Dengan riwayat < 3 bulan, level prediksi sudah memakai laju 90 hari yang memuat semua tagihan aktif.
       boolean inModel = inHistory || n < 3;
       String lastP = left == Integer.MAX_VALUE ? null : Fmt.addMonths(Fmt.period(bl.due), left - 1);
@@ -594,6 +595,42 @@ final class Forecast {
       m.expLo[k] = round(Math.max(0, e - be)); m.expHi[k] = round(e + be);
     }
     return m;
+  }
+
+  static boolean weekly(Bill b) { return b.freq == Bill.FREQ_WEEK || b.freq == Bill.FREQ_2WEEK; }
+
+  /**
+   * Tagihan non-bulanan (4.0): setiap jatuh tempo dimasukkan ke bulan kejadiannya. Tagihan mingguan yang
+   * sudah tercermin di riwayat hanya dikoreksi selisihnya terhadap rata-rata bulanan; tagihan triwulan s.d.
+   * tahunan selalu ditambahkan pada bulan jatuh temponya (lonjakan tahunan dipangkas dari riwayat bulanan).
+   */
+  private static void nonMonthly(Monthly m, Bill bl, int left, boolean inHistory, String cur, double[] adjE) {
+    int H = adjE.length;
+    boolean inModel = inHistory && weekly(bl);
+    double[] occ = new double[H];
+    String d = bl.due, last = null;
+    int k = left, guard = 0;
+    while (k > 0 && guard++ < 2000) {
+      int i = Analytics.monthsBetween(cur, Fmt.period(d)) - 1;
+      if (i >= H) break;
+      if (i >= 0) occ[i] += bl.amount;
+      last = d;
+      k--;
+      d = bl.next(d);
+    }
+    long eq = bl.perMonth();
+    boolean ended = k == 0 && left != Integer.MAX_VALUE;
+    String lastP = ended && last != null ? Fmt.period(last) : null;
+    // Riwayat sudah memuat ±eq per bulan; setelah lunas occ = 0 sehingga koreksinya −eq.
+    for (int i = 0; i < H; i++) adjE[i] += occ[i] - (inModel ? eq : 0);
+    String unit = Bill.freqUnit(bl.freq);
+    if (inModel && lastP != null && lastP.compareTo(m.periods[H - 1]) < 0)
+      m.notes.add(bl.name + " lunas " + Fmt.monthShort(lastP) + " " + lastP.substring(0, 4) + " → pengeluaran turun ±" + Fmt.rp(eq) + "/bulan setelahnya");
+    else if (!inModel) {
+      String when = null;
+      for (int i = 0; i < H; i++) if (occ[i] > 0) { when = m.periods[i]; break; }
+      if (when != null) m.notes.add(bl.name + " (" + Fmt.rp(bl.amount) + "/" + unit + ") jatuh tempo " + Fmt.monthShort(when) + " " + when.substring(0, 4) + " — ditambahkan ke prediksi");
+    }
   }
 
   /** Uji mundur satu langkah: {simpangan baku galat, MAPE, jumlah titik}. NaN bila titik < 2. */

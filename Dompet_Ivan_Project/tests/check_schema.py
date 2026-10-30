@@ -1,4 +1,4 @@
-"""Uji migrasi database & validitas SQL Dompet 3.0 dengan SQLite (bukan uji UI Android).
+"""Uji migrasi database & validitas SQL Dompet Ivan 4.0 (skema 5) dengan SQLite (bukan uji UI Android).
 
 Membaca SQL langsung dari Schema.java / Db.java / Backup.java / Control.java lalu:
   1. membuat database versi lama (v1, v2, v2.5) berisi data contoh,
@@ -15,7 +15,7 @@ import sqlite3
 SRC = Path(__file__).resolve().parents[1] / "app/src/main/java/id/ivan/dompet"
 schema = (SRC / "Schema.java").read_text(encoding="utf-8")
 db_src = (SRC / "Db.java").read_text(encoding="utf-8")
-others = "".join((SRC / f).read_text(encoding="utf-8") for f in ("Backup.java", "Control.java"))
+others = "".join((SRC / f).read_text(encoding="utf-8") for f in ("Backup.java", "Control.java", "DataTools.java"))
 
 
 def java_str(s):
@@ -27,7 +27,7 @@ def array(name):
     return [java_str(x) for x in re.findall(r'"((?:\\.|[^"\\])*)"', block)]
 
 
-V1, V2, V3, V4 = array("V1"), array("V2"), array("V3"), array("V4")
+V1, V2, V3, V4, V5 = array("V1"), array("V2"), array("V3"), array("V4"), array("V5")
 EXP, INC = array("EXP"), array("INC")
 ICONS = [tuple(java_str(y) for y in re.findall(r'"((?:\\.|[^"\\])*)"', p))
          for p in re.findall(r"\{(\"[^{}]*?\", \"[^{}]*?\")\}", re.search(r"DEFAULT_ICONS = \{(.*?)\};", schema, re.S).group(1))]
@@ -75,6 +75,8 @@ def upgrade(con, old):
         for s in V4: con.execute(s)
         seed_categories(con)
         seed_icons(con)
+    if old < 5:
+        for s in V5: con.execute(s)
 
 
 def legacy(version):
@@ -105,8 +107,31 @@ def balance(con):
 
 
 results = []
-for version in (1, 2, 3):
-    con = legacy(version)
+def legacy4():
+    """Database Dompet 3.0/3.5 (skema 4) dengan data contoh."""
+    con = sqlite3.connect(":memory:")
+    for s in V1: con.execute(s)
+    with con:
+        for s in V2: con.execute(s)
+        for s in V3: con.execute(s)
+        seed_categories(con)
+        for s in V4: con.execute(s)
+        seed_categories(con)
+        seed_icons(con)
+    con.execute("INSERT INTO tx(date,type,amount,category,note) VALUES('2026-09-01',1,5000000,'Gaji','Gaji September')")
+    con.execute("INSERT INTO tx(date,type,amount,category,note) VALUES('2026-09-02',0,75000,'Makan & minum','Makan siang')")
+    con.execute("INSERT INTO tx(date,type,amount,category,note) VALUES('2026-09-03',0,150000,'Perawatan motor','Servis')")
+    con.execute("INSERT INTO bills(name,amount,kind,due,cycles,paid,anchor) VALUES('Kos',800000,'Tagihan','2026-10-31',0,3,31)")
+    con.execute("INSERT INTO categories(type,name,icon) VALUES(0,'Perawatan motor','🔧')")
+    con.execute("INSERT INTO goals(name,target,deadline) VALUES('Dana darurat',10000000,'')")
+    con.execute("INSERT INTO contributions(goal_id,amount,date) VALUES(1,500000,'2026-09-05')")
+    con.execute("INSERT INTO templates(name,type,amount,category,note,account) VALUES('Kopi',0,18000,'Makan & minum','Kopi pagi',1)")
+    con.commit()
+    return con
+
+
+for version in (1, 2, 3, 4):
+    con = legacy(version) if version < 4 else legacy4()
     before = con.execute("SELECT id,date,type,amount,category,note FROM tx ORDER BY id").fetchall()
     bal = balance(con)
     with con:
@@ -119,13 +144,15 @@ for version in (1, 2, 3):
     assert con.execute("SELECT name FROM accounts WHERE id=1").fetchone()[0] == "Dompet utama"
     assert con.execute("SELECT icon FROM categories WHERE type=0 AND name='Makan & minum'").fetchone()[0] == "🍜"
     assert con.execute("SELECT COUNT(*) FROM categories WHERE type=0 AND name='perawatan motor'").fetchone()[0] == 1, "kategori dari transaksi lama hilang"
+    assert con.execute("SELECT COUNT(*) FROM trash").fetchone()[0] == 0
     if version >= 2:
+        assert con.execute("SELECT freq FROM bills").fetchone()[0] == 0, "tagihan lama harus tetap bulanan"
         assert con.execute("SELECT deadline FROM goals").fetchone()[0] == ""
         assert con.execute("SELECT SUM(amount) FROM contributions").fetchone()[0] == 500000
     if version >= 3:
         assert con.execute("SELECT account FROM templates").fetchone()[0] == 1
     results.append(con)
-    print(f"PASS migrasi v{version} -> skema 4: transaksi, saldo, kategori, akun utama, target, template")
+    print(f"PASS migrasi v{version} -> skema 5: transaksi, saldo, kategori, akun utama, target, template, tagihan bulanan")
 
 fresh = sqlite3.connect(":memory:")
 with fresh:
@@ -176,11 +203,24 @@ assert set(re.findall(r'"(\w+)"', tx_cols)) <= {r[1] for r in con.execute("PRAGM
 for table in ("tx", "accounts", "debts", "wishes", "goals", "templates", "bills", "budgets", "settings", "categories", "contributions"):
     existing = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
     assert existing, table
-print(f"PASS {checked} pernyataan SQL/kolom di kode sumber valid terhadap skema 4")
+print(f"PASS {checked} pernyataan SQL/kolom di kode sumber valid terhadap skema 5")
+
+# Kolom nominal (konversi mata uang) & tabel reset harus ada.
+for table, col in re.findall(r'\{"(\w+)", "(\w+)"\}', re.search(r"MONEY_COLUMNS = \{(.*?)\};", db_src, re.S).group(1)):
+    assert col in {r[1] for r in con.execute(f"PRAGMA table_info({table})")}, (table, col)
+for group in ("DATA_TABLES", "STRUCTURE_TABLES"):
+    for t in re.findall(r'"(\w+)"', re.search(group + r" = \{([^}]*)\}", db_src).group(1)):
+        assert con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone(), t
+# Semua tabel data (kecuali settings & sqlite_sequence) tercakup oleh reset.
+tables_all = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")} - {"sqlite_sequence", "settings"}
+covered = set(re.findall(r'"(\w+)"', re.search(r"DATA_TABLES = \{([^}]*)\}", db_src).group(1))) | set(re.findall(r'"(\w+)"', re.search(r"STRUCTURE_TABLES = \{([^}]*)\}", db_src).group(1)))
+assert tables_all == covered, f"tabel tidak ikut direset: {tables_all - covered}"
+print("PASS reset & konversi mata uang mencakup semua tabel dan kolom nominal")
 
 # Kunci restore cadangan harus sesuai tabel yang ada.
 backup_src = (SRC / "Backup.java").read_text(encoding="utf-8")
 tables = re.findall(r'"(\w+)"', re.search(r"TABLES = \{([^}]*)\}", backup_src).group(1))
+assert set(tables) | {"tx"} == tables_all | {"settings"}, f"tabel tidak dicadangkan: {(tables_all | {'settings'}) - set(tables) - {'tx'}}"
 for t in tables:
     assert con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone(), t
 print("PASS daftar tabel cadangan/pemulihan sesuai skema")

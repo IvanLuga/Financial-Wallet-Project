@@ -1,15 +1,52 @@
-# Dompet 3.5 — Android offline
+# Dompet Ivan v4.0 — Android offline
 
-Pembaruan dari Dompet 3.0. Android 6.0 atau lebih baru. Tanpa akun, iklan, server, atau izin internet; data hanya tersimpan di HP.
+Pembaruan dari Dompet 3.5. Android 6.0 atau lebih baru. Tanpa akun, iklan, server, atau izin internet; data hanya tersimpan di HP.
+Nama di layar utama HP: **Dompet Ivan** (agar tidak terpotong); di dalam aplikasi, PDF, dan cadangan: **Dompet Ivan v4.0**.
 
-## Memasang pembaruan (dari 3.0 ke 3.5)
+## Memasang pembaruan (dari 3.x ke 4.0)
 
 1. Di aplikasi lama, buka menu `•••` → **Cadangkan data (JSON)**. Simpan juga salinannya di luar HP.
-2. Buka `Dompet_v3.5.apk` dan pilih **Perbarui**. **Jangan hapus aplikasi lama**, karena data lokal ikut terhapus.
-3. Paket tetap `id.ivan.dompet`, sertifikat tanda tangan sama dengan v1–v3.0 (SHA-256 `4d:b3:85:79…7f:6d:8e`), dan version code naik ke 5. **Skema database tidak berubah (tetap 4)**, jadi tidak ada migrasi; pengaturan simulasi disimpan di tabel pengaturan dan ikut dicadangkan.
-4. Saat pertama dibuka, muncul ringkasan fitur baru dengan tombol **Lihat prediksi**.
+2. Buka `Dompet_Ivan_v4.0.apk` dan pilih **Perbarui**. **Jangan hapus aplikasi lama**, karena data lokal ikut terhapus.
+3. Paket tetap `id.ivan.dompet`, sertifikat tanda tangan sama dengan v1–3.5 (SHA-256 `4d:b3:85:79…7f:6d:8e`), version code naik ke **6**. Database dimigrasi otomatis dari skema 4 ke **skema 5** (kolom siklus tagihan + tabel tempat sampah); semua data lama tetap utuh dan tagihan lama tetap bulanan.
+4. Saat pertama dibuka, muncul ringkasan fitur baru.
 
-## Yang baru di 3.5: tab **Proyeksi** (Prediksi · Simulasi · Alat)
+## Yang baru di 4.0
+
+### 1. Reset keuangan (menu `•••` → Zona berbahaya → **Reset keuangan**)
+Semua uang kembali ke nol dan aplikasi kembali seperti baru dipasang: Beranda, **Wawasan, Proyeksi, Kontrol, dan Rencana kosong** (transaksi, akun, kategori buatan sendiri, template, amplop, tagihan, target + alokasi, utang-piutang, wishlist, tempat sampah, batas kontrol, asumsi proyeksi, skenario simulasi, dan riwayat peringatan notifikasi dihapus). Kategori bawaan dan akun "Dompet utama" dibuat ulang. Yang dipertahankan: tema, animasi, PIN & sidik jari, nama panggilan.
+
+Pengaman berlapis agar tidak terjadi reset tidak sengaja:
+1. Letaknya di bagian **Zona berbahaya** paling bawah menu, berwarna merah.
+2. Layar ringkasan menampilkan **apa saja yang akan dihapus** (jumlah transaksi, saldo, akun, tagihan, dll.), tanggal cadangan terakhir, dan tombol **Cadangkan dulu**.
+3. Bila PIN aktif, **PIN wajib dimasukkan** (salah 3× = reset dibatalkan).
+4. Harus **mengetik `RESET`**, dan tombol baru aktif setelah **hitung mundur 5 detik**.
+5. Sebelum menghapus, aplikasi menyimpan **salinan otomatis** di penyimpanan internal. Selama **7 hari**, menu `•••` menampilkan **Batalkan reset terakhir** untuk mengembalikan semua data. Bila salinan gagal dibuat, reset tidak dijalankan. Reset kedua saat data masih kosong tidak menimpa salinan pertama.
+
+Opsi: **Pertahankan daftar akun, kategori & template** (saldo tetap nol) dan, bila memakai mata uang selain rupiah, **tetap pakai mata uang tersebut**.
+
+### 2. Ganti mata uang (menu `•••` → **Mata uang**)
+- 18 mata uang: IDR, USD, EUR, SGD, MYR, JPY, GBP, AUD, SAR, CNY, KRW, THB, PHP, INR, HKD, AED, VND, BND.
+- Format mengikuti mata uang, termasuk **sen/desimal** (mis. `$1.250,50`). Pemisah tetap gaya Indonesia: titik = ribuan, koma = desimal. Di keypad, tombol `000` berganti menjadi `,` untuk mata uang bersen.
+- Saat mengganti, pilih:
+  - **Konversi dengan kurs**: ketik kurs sendiri (mis. `1 USD = 16.300 IDR`); semua nominal ikut dikonversi — transaksi, saldo, amplop, tagihan, target, utang, wishlist, template, tempat sampah, batas kontrol, dan skenario simulasi. Ada pratinjau saldo sebelum/sesudah.
+  - **Hanya ganti simbol**: angka tetap sama, hanya simbolnya berubah.
+- Kurs **tidak** diambil dari internet (aplikasi tetap tanpa izin internet). Angka awal di kolom kurs hanya perkiraan bawaan.
+- Ambang otomatis (kebocoran kecil, transaksi besar, nominal cepat, saran batas) ikut menyesuaikan skala mata uang.
+- PDF, CSV (kolom "Jumlah (USD)"), dan cadangan JSON mencatat mata uangnya. Memulihkan cadangan juga memulihkan mata uangnya (cadangan lama = rupiah).
+
+### 3. Tiga fitur pelengkap
+1. **Tempat sampah transaksi** (menu `•••` → Tempat sampah): transaksi yang dihapus disimpan **30 hari** dan bisa **dipulihkan** dengan tanggal aslinya (kategori/akun yang sudah dihapus dibuat ulang atau dibuka dari arsip), dihapus permanen satu per satu, atau dikosongkan. Tombol **Urungkan** setelah menghapus kini mengembalikan transaksi yang sama.
+2. **Tagihan berulang fleksibel** (Rencana → Tagihan): siklus **mingguan, 2 mingguan, bulanan, tiap 3 bulan, tiap 6 bulan, atau tahunan** (pajak motor, asuransi, langganan tahunan). Jatuh tempo maju sesuai siklus (tanggal 31/29 Feb tidak bergeser permanen). Prediksi, arus kas 30 hari, "30 hari ke depan", rasio cicilan, dan PDF ikut memakai siklus ini (tagihan tahunan masuk ke bulan jatuh temponya; tagihan mingguan bisa muncul beberapa kali).
+3. **Buka kunci dengan sidik jari** (menu `•••` → PIN → **Buka dengan sidik jari**): pintasan untuk PIN di layar kunci (perlu PIN dan sidik jari terdaftar di Android). PIN tetap bisa dipakai kapan saja.
+
+### 4. Perbaikan bug & keamanan
+- **Jeda setelah PIN salah**: 5× salah = tunggu 30 detik, berlipat hingga maks. 15 menit (bertahan walau aplikasi ditutup). Sebelumnya PIN bisa ditebak tanpa batas.
+- Setelah **Tandai dibayar** pada tagihan, peringatan kontrol kini memeriksa transaksi pembayaran itu sendiri. Sebelumnya bisa memeriksa transaksi lain bila ada transaksi bertanggal di masa depan.
+- Setelah **Pulihkan dari cadangan**, ikon kategori dan isian layar (mis. skenario simulasi) tidak lagi memakai data lama yang tersimpan di memori.
+- Mode privasi kini menyamarkan nominal dalam teks wawasan/proyeksi tanpa ikut "memakan" koma sesudahnya, dan berlaku untuk semua simbol mata uang.
+- Pencarian berdasarkan nominal bekerja benar untuk mata uang bersen.
+
+## Fitur dari 3.5 (tetap ada): tab **Proyeksi** (Prediksi · Simulasi · Alat)
 
 Navigasi bawah kini punya 5 tab: Beranda, Wawasan, **＋**, **Proyeksi**, Kontrol, Rencana.
 
@@ -111,28 +148,27 @@ Kartu **keyakinan prediksi** (Rendah/Sedang/Tinggi) selalu tampil di atas, beser
 
 ## Cadangan dan laporan
 
-- Cadangan JSON **schema 4** (tidak berubah di 3.5) mencakup transaksi (dengan akun), akun, kategori + ikon, template, anggaran, tagihan, target + tenggat, alokasi, utang-piutang, wishlist, dan pengaturan kontrol, termasuk asumsi proyeksi, skenario simulasi tersimpan, dan pilihan kategori pokok (3.5).
-- Cadangan schema 1–3 (Dompet 1.x–2.5) tetap bisa dipulihkan. Pemulihan **mengganti** semua data di HP.
+- Cadangan JSON **schema 5** mencakup transaksi (dengan akun), akun, kategori + ikon, template, anggaran, tagihan (+ siklus), target + tenggat, alokasi, utang-piutang, wishlist, **tempat sampah**, dan pengaturan (termasuk **mata uang**, asumsi proyeksi, skenario simulasi).
+- Cadangan schema 1–4 (Dompet 1.x–3.5) tetap bisa dipulihkan. Pemulihan **mengganti** semua data di HP.
 - PDF, CSV, dan JSON selalu berisi nominal asli walaupun mode privasi sedang aktif.
 
 ## Pengujian dan batasan (baca ini)
 
 Yang sudah diverifikasi:
 
-- APK 3.5 berhasil dikompilasi, di-*dex*, disejajarkan, dan ditandatangani (skema v1/v2/v3). Sertifikat SHA-256 `4d:b3:85:79…7f:6d:8e` sama dengan rilis sebelumnya.
-- `python3 tests/check_schema.py`: migrasi dari skema v1, v2, dan v2.5 ke skema 4 (transaksi, saldo, kategori, akun utama, target, template tetap utuh), instalasi baru, saldo transfer, serta **setiap query SQL di kode sumber** dijalankan terhadap skema hasil migrasi.
-- `bash tests/run_logic_tests.sh`: 980+ pemeriksaan logika lama (format rupiah, kalkulator, tanggal, kecepatan belanja, skor, laporan & wawasan, 300 uji acak) **ditambah 12.000+ pemeriksaan baru** untuk prediksi & simulasi (`tests/ForecastTest.java`): deteksi gaji/kos rutin tanpa menggandakan tagihan, pola hari, jadwal cicilan yang berhenti saat lunas, utang/tagihan terlambat, konsistensi saldo, prediksi akhir bulan & tanggal amplop habis, ketahanan terhadap lonjakan, uji mundur, tahunan, rumus cicilan (anuitas 12%/12 bln = Rp8.884.879; flat 10% ≈ efektif 18%), target, investasi, dana darurat, simpan/muat skenario ≤200 karakter, batas nilai ekstrem, serta 300 uji data acak.
+- APK 4.0 berhasil dikompilasi, di-*dex*, disejajarkan, dan ditandatangani (skema v1/v2/v3). Sertifikat SHA-256 `4d:b3:85:79…7f:6d:8e` **sama** dengan rilis 3.5 sehingga bisa dipasang sebagai pembaruan.
+- `python3 tests/check_schema.py`: migrasi v1, v2, v2.5, dan **3.x (skema 4)** ke skema 5 (data, saldo, kategori, akun utama, target, template tetap utuh; tagihan lama tetap bulanan), instalasi baru, saldo transfer, **setiap query SQL di kode sumber** terhadap skema 5, serta pengecekan bahwa **reset dan konversi mata uang mencakup semua tabel dan kolom nominal** dan semua tabel ikut dicadangkan.
+- `bash tests/run_logic_tests.sh`: 980+ pemeriksaan logika lama dan 12.000+ pemeriksaan prediksi & simulasi (semuanya tetap lulus), **ditambah 150.000+ pemeriksaan baru 4.0** (`tests/V4Test.java`): format/parse/kalkulator untuk 18 mata uang (termasuk sen, koma desimal, simbol berspasi), konversi kurs bolak-balik, nilai ekstrem, ambang yang diskalakan, samaran mode privasi, konversi skenario simulasi, siklus tagihan (mingguan s.d. tahunan, 31 Jan → 30 Apr → 31 Jul, 29 Feb), beban bulanan, jadwal & prediksi bulanan dengan tagihan tahunan/mingguan/triwulan, dan 300 uji acak.
 
 Yang **belum** diverifikasi:
 
-- **Belum diuji di HP atau emulator.** Lingkungan build tidak punya emulator (dan tidak bisa mengunduh Robolectric). Tab Proyeksi, penggeser, grafik garis baru, sheet alat, bagian PDF proyeksi, dan notifikasi prediktif belum pernah dijalankan di perangkat nyata; kode tampilannya mengikuti pola yang sama dengan layar 3.0 dan sudah ditinjau manual, tetapi bug tampilan atau crash tetap mungkin. Bug tampilan atau crash di layar tertentu masih mungkin terjadi. Cadangkan data sebelum memperbarui, lalu laporkan layar yang bermasalah.
+- **Belum diuji di HP atau emulator.** Lingkungan build tidak punya emulator, dan uji Android (Robolectric) tidak bisa diunduh karena repositori Google diblokir. Layar baru (mata uang, tempat sampah, reset, siklus tagihan, sidik jari) mengikuti pola kode yang sama dengan layar lama dan sudah ditinjau manual, tetapi bug tampilan atau crash tetap mungkin. **Cadangkan data sebelum memperbarui**, lalu laporkan layar yang bermasalah.
+- **Sidik jari** memakai `FingerprintManager` (API 23). Di Android baru API ini berstatus usang tetapi masih berfungsi di sebagian besar HP; di HP yang hanya punya pengenal wajah, opsi ini tidak muncul. Bila sensor tidak merespons, PIN tetap bisa dipakai.
+- **Kurs** tidak otomatis. Konversi memakai kurs yang Anda ketik; tiap nominal dibulatkan ke satuan terkecil (sen/rupiah), jadi konversi bolak-balik bisa selisih beberapa rupiah per transaksi.
+- **Salinan pembatalan reset** tersimpan di penyimpanan internal aplikasi selama 7 hari. Bila data aplikasi dihapus dari Pengaturan Android, salinan ikut hilang; hanya cadangan JSON yang aman.
 - APK dibangun dengan Android build tools dari repositori Ubuntu (aapt2, dx, apksigner) dan dikompilasi terhadap API 23. API Android yang lebih baru (kanal notifikasi) dipanggil lewat refleksi.
-- Notifikasi terjadwal memakai alarm tidak presisi (tanpa izin alarm presisi), sehingga bisa terlambat beberapa menit hingga jam, terutama di Samsung dengan penghemat baterai. Atur Baterai → **Tidak dibatasi** untuk Dompet. Peringatan saat mencatat transaksi selalu langsung muncul.
-- Tagihan berulang hanya bulanan. Siklus mingguan/tahunan belum didukung; pengeluaran tahunan (pajak motor, THR, sekolah) belum dikenali sebagai musiman — masukkan sebagai **peristiwa** di Simulasi.
-- Prediksi butuh data: dengan <30 hari catatan atau <2 bulan riwayat penuh keyakinannya **Rendah**; transaksi rutin baru terdeteksi setelah ±3 bulan. Prediksi hanya sebaik kelengkapan catatanmu.
-- Rentang 80% bukan jaminan; pada data yang sangat naik-turun rentangnya lebar dan itu disengaja. Imbal hasil di simulasi/alat adalah asumsi, bukan janji.
-- Simulasi menerapkan persentase penggeser ke angka dasar, lalu potongan kategori dan peristiwa; kenaikan/inflasi dihitung bertahap per periode. Ini model sederhana, bukan perencanaan keuangan profesional.
-- Wawasan dan skor kesehatan bergantung pada kelengkapan catatan Anda dan merupakan alat bantu, bukan nasihat keuangan profesional.
+- Notifikasi terjadwal memakai alarm tidak presisi, sehingga bisa terlambat beberapa menit hingga jam, terutama di Samsung dengan penghemat baterai. Atur Baterai → **Tidak dibatasi** untuk Dompet Ivan.
+- Prediksi butuh data: dengan <30 hari catatan atau <2 bulan riwayat penuh keyakinannya **Rendah**. Rentang 80% bukan jaminan; imbal hasil di simulasi/alat adalah asumsi, bukan janji. Wawasan dan skor kesehatan adalah alat bantu, bukan nasihat keuangan profesional.
 - PIN tidak bisa dipulihkan jika lupa (tidak ada server). Satu-satunya jalan adalah menghapus data aplikasi lalu memulihkan dari cadangan.
 - Mode privasi hanya menyamarkan tampilan, bukan enkripsi.
 
@@ -140,20 +176,22 @@ Yang **belum** diverifikasi:
 
 | Berkas | Isi |
 |---|---|
-| `Schema.java` | SQL migrasi v1→v4, kategori & ikon bawaan |
-| `Db.java` | Akses SQLite: transaksi, akun, kategori, anggaran, tagihan, target, utang, wishlist, pengaturan |
-| `Model.java`, `Fmt.java`, `Analytics.java` | Logika murni Java (diuji di JVM): format, kalkulator, tanggal, laporan, wawasan, skor |
-| `Forecast.java`, `Simulator.java` | **3.5** — logika murni prediksi (rutin, harian, arus kas, akhir bulan, bulanan, tahunan) dan simulasi/alat (diuji di `tests/ForecastTest.java`) |
-| `Projection.java` | **3.5** — tab Proyeksi: Prediksi, Simulasi, Alat, kartu beranda |
+| `Schema.java` | SQL migrasi v1→v5, kategori & ikon bawaan |
+| `Db.java` | Akses SQLite: transaksi, **tempat sampah**, akun, kategori, anggaran, tagihan, target, utang, wishlist, pengaturan, **reset & konversi mata uang** |
+| `Model.java`, `Fmt.java`, `Analytics.java` | Logika murni Java (diuji di JVM): **mata uang**, format, kalkulator, tanggal, **siklus tagihan**, laporan, wawasan, skor |
+| `Forecast.java`, `Simulator.java` | Logika murni prediksi dan simulasi/alat (diuji di `tests/ForecastTest.java` & `tests/V4Test.java`) |
+| `DataTools.java` | **4.0** — layar mata uang, tempat sampah, reset keuangan + pembatalan |
+| `Fingerprint.java` | **4.0** — buka kunci sidik jari |
+| `Projection.java` | Tab Proyeksi: Prediksi, Simulasi, Alat, kartu beranda |
 | `Control.java`, `Notifier.java`, `ReminderReceiver.java` | Aturan kontrol & notifikasi, alarm pagi/malam |
 | `Ui.java`, `Charts.java` | Tema, komponen, bottom sheet, animasi, grafik kustom |
-| `MainActivity.java` | Kerangka, navigasi, PIN, menu, ekspor/impor berkas |
+| `MainActivity.java` | Kerangka, navigasi, PIN & sidik jari, menu, ekspor/impor berkas |
 | `Home.java`, `Insights.java`, `ControlScreen.java`, `Plan.java`, `Forms.java` | Layar dan formulir |
 | `PdfReport.java`, `Backup.java` | Laporan PDF, cadangan JSON, CSV |
 
 ## Build ulang
 
-Arsip memuat kode, `dompet-release.keystore`, dan `signing-password.txt`. **Jangan bagikan arsip ini. Bagikan APK saja.** Kunci yang sama wajib dipakai untuk pembaruan berikutnya; jika hilang, pembaruan tidak bisa dipasang tanpa menghapus aplikasi lama.
+`dompet-release.keystore` dan `signing-password.txt` **tidak** ada di repositori ini (sengaja, lihat `.gitignore`). Simpan keduanya dari arsip proyek Anda di tempat aman: **kunci yang sama wajib dipakai untuk pembaruan berikutnya**; jika hilang, pembaruan tidak bisa dipasang tanpa menghapus aplikasi lama. Taruh kedua berkas itu di folder ini sebelum build.
 
 Di Ubuntu/Debian:
 
@@ -164,6 +202,6 @@ python3 tests/check_schema.py
 bash tests/run_logic_tests.sh
 ```
 
-Hasilnya `Dompet_v3.5.apk`. Dengan Android SDK resmi, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (kode tetap kompatibel API 23). Untuk pembaruan berikutnya, naikkan `versionCode` di `AndroidManifest.xml` dan `build.sh`.
+Hasilnya `Dompet_Ivan_v4.0.apk`. Dengan Android SDK resmi, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (kode tetap kompatibel API 23). Untuk pembaruan berikutnya, naikkan `versionCode` di `AndroidManifest.xml`, `build.sh`, dan `MainActivity.VERSION_CODE`.
 
 Aturan penulisan kode: **jangan memakai lambda/method reference**, karena `dx` tidak melakukan desugaring. Jangan memanggil API di atas level 23 secara langsung; gunakan pengecekan `Build.VERSION.SDK_INT` dan refleksi.

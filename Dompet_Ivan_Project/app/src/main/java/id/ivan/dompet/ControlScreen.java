@@ -140,7 +140,7 @@ final class ControlScreen {
         final long v = opts[i];
         TextView chip = ui.chip(names[i] + " · " + Fmt.compact(v), false, ui.primary);
         chip.setTextSize(11.5f);
-        ui.click(chip, new Runnable() { public void run() { month.setText(Fmt.group(v)); } });
+        ui.click(chip, new Runnable() { public void run() { month.setText(Fmt.num(v)); } });
         LinearLayout.LayoutParams p = Ui.lp(Ui.WRAP, Ui.WRAP);
         p.rightMargin = ui.dp(6);
         sug.addView(chip, p);
@@ -155,7 +155,7 @@ final class ControlScreen {
     sh.body.addView(day);
     sh.body.addView(ui.text("Batas harian otomatis = sisa batas bulanan ÷ sisa hari, sehingga menyesuaikan jika kemarin boros atau hemat.", 12, ui.muted));
     ui.fieldLabel(sh.body, "Transaksi dianggap \"besar\" mulai");
-    final android.widget.EditText unusual = ui.moneyInput("Bawaan Rp500.000", s.unusualMin);
+    final android.widget.EditText unusual = ui.moneyInput("Bawaan " + Fmt.rp(Fmt.th(500_000)), s.unusualMin);
     sh.body.addView(unusual);
     sh.body.addView(ui.text("Peringatan juga muncul untuk transaksi ≥ 3× median pengeluaranmu (minimal ambang ini).", 12, ui.muted));
     sh.primary("Simpan", ui.primary, new Runnable() {
@@ -164,7 +164,7 @@ final class ControlScreen {
         db.set("limit_week", Math.max(0, Fmt.parseAmount(week.getText().toString())));
         db.set("limit_day", Math.max(0, Fmt.parseAmount(day.getText().toString())));
         long u = Fmt.parseAmount(unusual.getText().toString());
-        db.set("unusual_min", u > 0 ? u : 500_000);
+        db.set("unusual_min", u > 0 ? u : Fmt.th(500_000));
         sh.dismiss();
         a.render(false);
         a.toast("Batas disimpan");
@@ -173,7 +173,7 @@ final class ControlScreen {
     sh.show();
   }
 
-  private static long round50k(long v) { return Math.max(50_000, Math.round(v / 50_000.0) * 50_000); }
+  private static long round50k(long v) { long step = Fmt.th(50_000); return Math.max(step, Math.round(v / (double) step) * step); }
 
   // ---------------- Hari ini & minggu ini ----------------
 
@@ -266,7 +266,7 @@ final class ControlScreen {
     body.addView(head);
     if (list.isEmpty()) {
       LinearLayout c = ui.card(body);
-      c.addView(ui.text("Amplop = batas per kategori (mis. Makan Rp1,5 jt, Hiburan Rp300 rb). Notifikasi dikirim saat 50/80/100% terpakai.", 13, ui.muted));
+      c.addView(ui.text("Amplop = batas per kategori (mis. Makan " + Fmt.compact(Fmt.th(1_500_000)) + ", Hiburan " + Fmt.compact(Fmt.th(300_000)) + "). Notifikasi dikirim saat 50/80/100% terpakai.", 13, ui.muted));
       ui.gap(c, 10);
       LinearLayout btn = ui.row();
       btn.addView(ui.button("+ Buat amplop", ui.primary, new Runnable() { public void run() { editBudget(null, period); } }), Ui.weight(1));
@@ -471,14 +471,14 @@ final class ControlScreen {
     LinearLayout btns = ui.row();
     btns.addView(ui.outline("Kirim notifikasi uji", ui.primary, new Runnable() {
       public void run() {
-        boolean ok = Notifier.post(a, 999, Notifier.CH_CONTROL, "Notifikasi Dompet berfungsi ✓", "Peringatan boros dan pengingat akan tampil seperti ini.", 2, 0xFF0C8A82);
+        boolean ok = Notifier.post(a, 999, Notifier.CH_CONTROL, "Notifikasi Dompet Ivan berfungsi ✓", "Peringatan boros dan pengingat akan tampil seperti ini.", 2, 0xFF0C8A82);
         if (!ok) { a.toast("Notifikasi belum diizinkan"); openAppSettings(); }
       }
     }), Ui.weight(1));
     ui.hgap(btns, 8);
     btns.addView(ui.outline("Pengaturan baterai", ui.muted, new Runnable() {
       public void run() {
-        ui.info("Agar pengingat tepat waktu", "Android (terutama Samsung) bisa menunda atau memblokir pengingat aplikasi yang \"tidur\". Jika notifikasi terlambat:\n\n1. Pengaturan → Aplikasi → Dompet → Baterai → pilih \"Tidak dibatasi\".\n2. Pengaturan → Perawatan perangkat → Baterai → Batas penggunaan latar belakang → pastikan Dompet tidak ada di daftar \"Aplikasi tidur\".\n\nPeringatan saat Anda mencatat transaksi selalu langsung muncul.");
+        ui.info("Agar pengingat tepat waktu", "Android (terutama Samsung) bisa menunda atau memblokir pengingat aplikasi yang \"tidur\". Jika notifikasi terlambat:\n\n1. Pengaturan → Aplikasi → Dompet Ivan → Baterai → pilih \"Tidak dibatasi\".\n2. Pengaturan → Perawatan perangkat → Baterai → Batas penggunaan latar belakang → pastikan Dompet Ivan tidak ada di daftar \"Aplikasi tidur\".\n\nPeringatan saat Anda mencatat transaksi selalu langsung muncul.");
         openAppSettings();
       }
     }), Ui.weight(1));

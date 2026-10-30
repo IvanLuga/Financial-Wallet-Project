@@ -107,11 +107,12 @@ final class Plan {
       ui.hgap(r, 12);
       LinearLayout t = ui.col();
       t.addView(ui.label(b.name, 15, ui.text));
-      t.addView(ui.text(b.kind + " · " + Fmt.dayLabel(b.due) + (b.cycles > 0 ? " · " + b.paid + "/" + b.cycles + " lunas" : ""), 12, ui.muted));
+      t.addView(ui.text(b.kind + " · " + Bill.freqName(b.freq) + " · " + Fmt.dayLabel(b.due) + (b.cycles > 0 ? " · " + b.paid + "/" + b.cycles + " lunas" : ""), 12, ui.muted));
       r.addView(t, Ui.weight(1));
       LinearLayout right = ui.col();
       right.setGravity(android.view.Gravity.END);
       right.addView(ui.label(a.money(b.amount), 15, ui.text));
+      if (!b.monthly()) right.addView(ui.text("/" + Bill.freqUnit(b.freq), 11, ui.muted));
       TextView due = ui.label(Fmt.dueLabel(b.due), 11, color);
       due.setBackground(ui.round(ui.soft(color), 10));
       ui.pad(due, 8, 2, 8, 2);
@@ -131,17 +132,15 @@ final class Plan {
   private void pay(final Bill b) {
     chooseAccount("Bayar " + b.name, new Forms.Str() {
       public void on(final String acc) {
-        ui.confirm("Bayar " + b.name + "?", "Mencatat pengeluaran " + a.money(b.amount) + " (kategori Tagihan) dari " + db.accountName(Long.parseLong(acc)) + " dan memajukan jatuh tempo ke " + Fmt.dayLabel(Fmt.nextMonthly(b.due, b.anchorDay())) + ". Pastikan belum dicatat manual.", "Catat bayar", ui.primary, new Runnable() {
+        ui.confirm("Bayar " + b.name + "?", "Mencatat pengeluaran " + a.money(b.amount) + " (kategori Tagihan) dari " + db.accountName(Long.parseLong(acc)) + " dan memajukan jatuh tempo ke " + Fmt.dayLabel(b.next(b.due)) + ". Pastikan belum dicatat manual.", "Catat bayar", ui.primary, new Runnable() {
           public void run() {
-            db.payBill(b, Long.parseLong(acc));
+            // Pakai transaksi yang baru dibuat (bukan recent(1): transaksi bertanggal depan bisa berada di urutan teratas).
+            Tx t = db.payBill(b, Long.parseLong(acc));
             ReminderReceiver.schedule(a);
             a.render(false);
             a.snack("Pembayaran " + b.name + " dicatat", null, null);
-            Tx t = db.recent(1).isEmpty() ? null : db.recent(1).get(0);
-            if (t != null) {
-              ArrayList<Control.Alert> al = Control.afterExpense(a, db, t);
-              if (!al.isEmpty()) a.forms.alert(al.get(0));
-            }
+            ArrayList<Control.Alert> al = Control.afterExpense(a, db, t);
+            if (!al.isEmpty()) a.forms.alert(al.get(0));
           }
         });
       }
@@ -149,17 +148,21 @@ final class Plan {
   }
 
   private void editBill(final Bill old) {
-    final Ui.Sheet s = ui.sheet(old == null ? "Tagihan baru" : "Ubah tagihan", "Berulang setiap bulan");
+    final Ui.Sheet s = ui.sheet(old == null ? "Tagihan baru" : "Ubah tagihan", "Pilih siklus: mingguan sampai tahunan");
     final EditText name = ui.input("Nama, mis. Listrik, Kos, Netflix", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 60);
     if (old != null) name.setText(old.name);
     s.body.addView(name);
     ui.fieldLabel(s.body, "Jumlah per pembayaran");
-    final EditText amount = ui.moneyInput("Rp", old == null ? 0 : old.amount);
+    final EditText amount = ui.moneyInput(Fmt.sym().trim(), old == null ? 0 : old.amount);
     s.body.addView(amount);
     ui.fieldLabel(s.body, "Jenis");
     final String[] kind = {old == null ? "Tagihan" : old.kind};
     final LinearLayout kinds = ui.row();
     s.body.addView(kinds);
+    ui.fieldLabel(s.body, "Berulang setiap");
+    final int[] freq = {old == null ? Bill.FREQ_MONTH : old.freq};
+    final Ui.Flow freqs = ui.flow();
+    s.body.addView(freqs);
     ui.fieldLabel(s.body, "Jatuh tempo berikutnya");
     final String[] due = {old == null ? Fmt.today() : old.due};
     final TextView dueChip = ui.chip("📅  " + Fmt.dayLabel(due[0]), true, ui.primary);
@@ -174,6 +177,12 @@ final class Plan {
     final Runnable[] fill = new Runnable[1];
     fill[0] = new Runnable() {
       public void run() {
+        freqs.removeAllViews();
+        for (final int f : Bill.FREQS) {
+          TextView c = ui.chip(Bill.freqName(f), f == freq[0], ui.primary);
+          ui.click(c, new Runnable() { public void run() { freq[0] = f; fill[0].run(); } });
+          freqs.addView(c);
+        }
         kinds.removeAllViews();
         for (final String k : new String[]{"Tagihan", "Cicilan", "Langganan"}) {
           TextView c = ui.chip(k, k.equals(kind[0]), ui.primary);
@@ -201,7 +210,7 @@ final class Plan {
         if (amt <= 0) { amount.setError("Isi jumlah"); return; }
         if (cyc < 0 || cyc > 600 || (old != null && cyc > 0 && cyc < old.paid)) { cycles.setError("Jumlah tidak valid"); return; }
         int anchor = old != null && old.due.equals(due[0]) ? old.anchorDay() : Fmt.day(due[0]);
-        db.putBill(old == null ? 0 : old.id, n, amt, kind[0], due[0], cyc, old == null ? 0 : old.paid, anchor);
+        db.putBill(old == null ? 0 : old.id, n, amt, kind[0], due[0], cyc, old == null ? 0 : old.paid, anchor, freq[0]);
         ReminderReceiver.schedule(a);
         s.dismiss();
         a.render(false);
@@ -258,7 +267,7 @@ final class Plan {
     if (old != null) name.setText(old.name);
     s.body.addView(name);
     ui.fieldLabel(s.body, "Nilai target");
-    final EditText target = ui.moneyInput("Rp", old == null ? 0 : old.target);
+    final EditText target = ui.moneyInput(Fmt.sym().trim(), old == null ? 0 : old.target);
     s.body.addView(target);
     ui.fieldLabel(s.body, "Tenggat (opsional)");
     final String[] deadline = {old == null ? "" : old.deadline};
@@ -274,9 +283,9 @@ final class Plan {
     long avg = db.avgMonthlyExpense(Fmt.period(Fmt.today()));
     if (old == null && avg > 0) {
       ui.gap(s.body, 8);
-      final long ef = Math.round(avg * 3 / 100_000.0) * 100_000;
+      final long efStep = Fmt.th(100_000), ef = Math.round(avg * 3 / (double) efStep) * efStep;
       s.body.addView(ui.link("💡 Isi dana darurat 3× pengeluaran bulanan (" + a.money(ef) + ")", ui.primary, new Runnable() {
-        public void run() { name.setText("Dana darurat"); target.setText(Fmt.group(ef)); }
+        public void run() { name.setText("Dana darurat"); target.setText(Fmt.num(ef)); }
       }));
     }
     if (old != null) {
@@ -306,9 +315,9 @@ final class Plan {
     if (!withdraw && g.target > g.saved) {
       LinearLayout chips = ui.row();
       ui.pad(chips, 0, 8, 0, 0);
-      for (final long v : new long[]{50_000, 100_000, 500_000, g.target - g.saved}) {
+      for (final long v : new long[]{Fmt.th(50_000), Fmt.th(100_000), Fmt.th(500_000), g.target - g.saved}) {
         TextView c = ui.chip(v == g.target - g.saved ? "Lunasi " + Fmt.compact(v) : Fmt.compact(v), false, ui.green);
-        ui.click(c, new Runnable() { public void run() { amount.setText(Fmt.group(v)); } });
+        ui.click(c, new Runnable() { public void run() { amount.setText(Fmt.num(v)); } });
         LinearLayout.LayoutParams p = Ui.lp(Ui.WRAP, Ui.WRAP);
         p.rightMargin = ui.dp(6);
         chips.addView(c, p);
@@ -440,7 +449,7 @@ final class Plan {
     if (old != null) person.setText(old.person);
     s.body.addView(person);
     ui.fieldLabel(s.body, "Jumlah total");
-    final EditText amount = ui.moneyInput("Rp", old == null ? 0 : old.amount);
+    final EditText amount = ui.moneyInput(Fmt.sym().trim(), old == null ? 0 : old.amount);
     s.body.addView(amount);
     ui.fieldLabel(s.body, "Tenggat (opsional)");
     final String[] due = {old == null ? "" : old.due};
@@ -564,7 +573,7 @@ final class Plan {
     final EditText name = ui.input("Mis. Sepatu lari", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 60);
     s.body.addView(name);
     ui.fieldLabel(s.body, "Perkiraan harga");
-    final EditText price = ui.moneyInput("Rp", 0);
+    final EditText price = ui.moneyInput(Fmt.sym().trim(), 0);
     s.body.addView(price);
     ui.fieldLabel(s.body, "Masa tenang");
     final int[] days = {7};

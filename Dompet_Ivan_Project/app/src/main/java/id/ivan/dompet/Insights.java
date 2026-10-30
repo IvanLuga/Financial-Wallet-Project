@@ -224,8 +224,8 @@ final class Insights {
       card.addView(ui.badge(in.icon, "i", color, 38));
       ui.hgap(card, 12);
       LinearLayout t = ui.col();
-      t.addView(ui.label(a.hide ? in.title.replaceAll("Rp[0-9.]+", "Rp •••") : in.title, 14, ui.text));
-      TextView b = ui.text(a.hide ? in.body.replaceAll("Rp[0-9.]+", "Rp •••") : in.body, 12.5f, ui.muted);
+      t.addView(ui.label(a.hide ? Fmt.maskAll(in.title) : in.title, 14, ui.text));
+      TextView b = ui.text(a.hide ? Fmt.maskAll(in.body) : in.body, 12.5f, ui.muted);
       b.setLineSpacing(0, 1.15f);
       t.addView(b);
       card.addView(t, Ui.weight(1));

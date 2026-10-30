@@ -3,13 +3,13 @@ package id.ivan.dompet;
 /**
  * SQL skema database. Dipisah agar bisa diuji di luar Android (tests/check_schema.py
  * membaca array di bawah ini secara langsung). Jangan ubah pernyataan versi lama:
- * pengguna yang memperbarui dari v1/v2/v2.5 menjalankan migrasi berurutan.
+ * pengguna yang memperbarui dari v1/v2/v2.5/3.x menjalankan migrasi berurutan.
  */
 final class Schema {
   private Schema() {}
 
-  static final int DB_VERSION = 4;
-  static final int BACKUP_SCHEMA = 4;
+  static final int DB_VERSION = 5;
+  static final int BACKUP_SCHEMA = 5;
 
   /** Versi 1 (Dompet 1.x). */
   static final String[] V1 = {
@@ -46,6 +46,12 @@ final class Schema {
     "CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
     "CREATE INDEX idx_tx_category ON tx(category)",
     "CREATE INDEX idx_tx_account ON tx(account)"
+  };
+
+  /** Versi 5 (Dompet Ivan 4.0): siklus tagihan fleksibel dan tempat sampah transaksi (30 hari). */
+  static final String[] V5 = {
+    "ALTER TABLE bills ADD COLUMN freq INTEGER NOT NULL DEFAULT 0",
+    "CREATE TABLE trash(id INTEGER PRIMARY KEY AUTOINCREMENT,deleted TEXT NOT NULL,date TEXT NOT NULL,type INTEGER NOT NULL,amount INTEGER NOT NULL,category TEXT NOT NULL,note TEXT NOT NULL,account INTEGER NOT NULL DEFAULT 1,to_account INTEGER NOT NULL DEFAULT 0)"
   };
 
   static final String[] EXP = {"Makan & minum", "Transportasi", "Belanja", "Tagihan", "Kesehatan", "Pendidikan", "Hiburan", "Lainnya"};

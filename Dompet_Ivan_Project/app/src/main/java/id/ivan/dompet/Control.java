@@ -30,7 +30,7 @@ final class Control {
     s.monthLimit = db.settingLong("limit_month", 0);
     s.dayLimit = db.settingLong("limit_day", 0);
     s.weekLimit = db.settingLong("limit_week", 0);
-    s.unusualMin = db.settingLong("unusual_min", 500_000);
+    s.unusualMin = db.settingLong("unusual_min", Fmt.th(500_000));
     s.hemat = db.flag("hemat", false);
     s.nBudget = db.flag("n_budget", true);
     s.nMonth = db.flag("n_month", true);

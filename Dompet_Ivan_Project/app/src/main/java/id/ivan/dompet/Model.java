@@ -22,10 +22,60 @@ final class Model {
 
   static final class Budget { String period, category; long limit; }
 
-  /** anchor = tanggal asli jatuh tempo (1–31) agar tagihan tgl 31 tidak bergeser ke 28 setelah Februari. */
+  /**
+   * anchor = tanggal asli jatuh tempo (1–31) agar tagihan tgl 31 tidak bergeser ke 28 setelah Februari.
+   * freq (4.0) = siklus berulang; 0 = bulanan agar data lama tetap sama.
+   */
   static final class Bill {
-    long id, amount; String name, kind, due; int cycles, paid, anchor;
+    static final int FREQ_MONTH = 0, FREQ_WEEK = 1, FREQ_2WEEK = 2, FREQ_QUARTER = 3, FREQ_HALF = 4, FREQ_YEAR = 5;
+    /** Urutan tampilan pilihan siklus. */
+    static final int[] FREQS = {FREQ_WEEK, FREQ_2WEEK, FREQ_MONTH, FREQ_QUARTER, FREQ_HALF, FREQ_YEAR};
+
+    long id, amount; String name, kind, due; int cycles, paid, anchor, freq;
     int anchorDay() { return anchor > 0 ? anchor : Fmt.day(due); }
+
+    String next(String from) { return Fmt.nextDue(from, anchorDay(), freq); }
+
+    boolean monthly() { return freq == FREQ_MONTH; }
+
+    /** Rata-rata beban per bulan (mingguan ≈ 4,35×, tahunan ÷ 12). */
+    long perMonth() { return Math.round(amount * perMonthFactor(freq)); }
+
+    static double perMonthFactor(int freq) {
+      switch (freq) {
+        case FREQ_WEEK: return 52 / 12.0;
+        case FREQ_2WEEK: return 26 / 12.0;
+        case FREQ_QUARTER: return 1 / 3.0;
+        case FREQ_HALF: return 1 / 6.0;
+        case FREQ_YEAR: return 1 / 12.0;
+        default: return 1;
+      }
+    }
+
+    static String freqName(int freq) {
+      switch (freq) {
+        case FREQ_WEEK: return "Mingguan";
+        case FREQ_2WEEK: return "2 mingguan";
+        case FREQ_QUARTER: return "Tiap 3 bulan";
+        case FREQ_HALF: return "Tiap 6 bulan";
+        case FREQ_YEAR: return "Tahunan";
+        default: return "Bulanan";
+      }
+    }
+
+    /** Satuan untuk teks "Rp100.000/…". */
+    static String freqUnit(int freq) {
+      switch (freq) {
+        case FREQ_WEEK: return "minggu";
+        case FREQ_2WEEK: return "2 minggu";
+        case FREQ_QUARTER: return "3 bulan";
+        case FREQ_HALF: return "6 bulan";
+        case FREQ_YEAR: return "tahun";
+        default: return "bulan";
+      }
+    }
+
+    static boolean validFreq(int f) { return f >= FREQ_MONTH && f <= FREQ_YEAR; }
   }
 
   static final class Goal { long id, target, saved; String name, deadline = ""; }

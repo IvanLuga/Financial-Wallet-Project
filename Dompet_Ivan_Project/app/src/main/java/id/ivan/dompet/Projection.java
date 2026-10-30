@@ -266,7 +266,9 @@ final class Projection {
     return l;
   }
 
-  private String mask(String s) { return a.hide ? s.replaceAll("-?Rp[0-9.,]+(rb|jt|M)?", "Rp •••") : s; }
+  private String mask(String s) { return a.hide ? Fmt.maskAll(s) : s; }
+
+  static long roundTo(long v, long step) { return Math.round(v / (double) step) * step; }
 
   static String compactLabel(long v) { return Fmt.compact(v); }
 
@@ -957,7 +959,7 @@ final class Projection {
   void askMoney(String title, String sub, long initial, final boolean allowNegative, final Amount done) {
     final Ui.Sheet s = ui.sheet(title, sub);
     final boolean[] neg = {initial < 0};
-    final EditText e = ui.moneyInput("Rp0", Math.abs(initial));
+    final EditText e = ui.moneyInput(Fmt.rp(0), Math.abs(initial));
     s.body.addView(e);
     if (allowNegative) {
       final TextView sign = ui.chip("Minus (−) / sedang berutang", neg[0], ui.red);
@@ -1126,7 +1128,7 @@ final class Projection {
     if (old != null) name.setText(old.name);
     s.body.addView(name);
     ui.fieldLabel(s.body, "Nominal");
-    final EditText amt = ui.moneyInput("Rp0", old == null ? 0 : Math.abs(old.amount));
+    final EditText amt = ui.moneyInput(Fmt.rp(0), old == null ? 0 : Math.abs(old.amount));
     s.body.addView(amt);
     final boolean[] income = {old != null && old.amount > 0};
     final LinearLayout dir = ui.row();
@@ -1291,13 +1293,14 @@ final class Projection {
 
   String csv(Simulator.Input in, Simulator.Result r) {
     StringBuilder b = new StringBuilder("﻿");
-    b.append("Simulasi Dompet;").append(Backup.esc(Fmt.today())).append('\n');
+    b.append("Simulasi Dompet Ivan;").append(Backup.esc(Fmt.today())).append('\n');
     b.append("Satuan;").append(Simulator.UNIT[in.unit]).append(";Periode;").append(in.periods).append('\n');
-    b.append("Saldo awal;").append(in.start).append(";Pemasukan/periode;").append(in.incomePerPeriod()).append(";Pengeluaran/periode;").append(in.expensePerPeriod()).append('\n');
+    b.append("Saldo awal;").append(Fmt.plain(in.start)).append(";Pemasukan/periode;").append(Fmt.plain(in.incomePerPeriod())).append(";Pengeluaran/periode;").append(Fmt.plain(in.expensePerPeriod())).append('\n');
     b.append("Kenaikan pemasukan/thn;").append(pct1(in.incGrowth)).append(";Inflasi/thn;").append(pct1(in.inflation)).append(";Imbal hasil/thn;").append(pct1(in.ret)).append("\n\n");
+    b.append("Mata uang;").append(Fmt.cur.code).append('\n');
     b.append("Periode;Tanggal/Bulan;Pemasukan;Pengeluaran;Peristiwa;Saldo;Nilai riil\n");
     for (int k = 0; k < r.bal.length; k++)
-      b.append(k).append(';').append(Backup.esc(periodLabel(in.unit, k, true))).append(';').append(r.inc[k]).append(';').append(r.exp[k]).append(';').append(r.ev[k]).append(';').append(r.bal[k]).append(';').append(r.real[k]).append('\n');
+      b.append(k).append(';').append(Backup.esc(periodLabel(in.unit, k, true))).append(';').append(Fmt.plain(r.inc[k])).append(';').append(Fmt.plain(r.exp[k])).append(';').append(Fmt.plain(r.ev[k])).append(';').append(Fmt.plain(r.bal[k])).append(';').append(Fmt.plain(r.real[k])).append('\n');
     return b.toString();
   }
 
@@ -1431,7 +1434,7 @@ final class Projection {
 
     EditText money(String label, long initial) {
       ui.fieldLabel(s.body, label);
-      EditText e = ui.moneyInput("Rp0", Math.max(0, initial));
+      EditText e = ui.moneyInput(Fmt.rp(0), Math.max(0, initial));
       watch(e);
       s.body.addView(e);
       return e;
@@ -1514,7 +1517,7 @@ final class Projection {
     t.s.body.addView(name);
     final EditText target = t.money("Jumlah target", preset == null ? 0 : preset.target);
     final EditText saved = t.money("Sudah terkumpul", preset == null ? 0 : preset.saved);
-    final EditText monthly = t.money("Setoran per bulan", surplus > 0 ? Math.round(surplus / 2 / 10_000.0) * 10_000 : 500_000);
+    final EditText monthly = t.money("Setoran per bulan", surplus > 0 ? roundTo(surplus / 2, Fmt.th(10_000)) : Fmt.th(500_000));
     final EditText ret = t.number("Imbal hasil (%/tahun, 0 bila hanya disimpan)", "0", true);
     final EditText deadline = t.number("Tenggat (bulan dari sekarang, opsional)", "", false);
     if (preset != null) {
@@ -1604,7 +1607,7 @@ final class Projection {
     t.s.body.addView(ui.hscroll(kind), kp);
     final long income = c.nextMonthly()[0];
     long existing0 = 0;
-    for (Bill b : c.bills) if ("Cicilan".equals(b.kind)) existing0 += b.amount;
+    for (Bill b : c.bills) if ("Cicilan".equals(b.kind)) existing0 += b.perMonth();
     final long existing = existing0;
     final long surplus = c.surplus();
     t.compute = new Runnable() {
@@ -1643,7 +1646,7 @@ final class Projection {
         String nm = name.getText().toString().trim();
         if (nm.isEmpty()) nm = "Cicilan baru";
         String due = Fmt.addMonths(Fmt.period(Fmt.today()), 1) + "-" + Fmt.pad2(Math.min(28, Fmt.day(Fmt.today())));
-        db.putBill(0, nm.length() > 60 ? nm.substring(0, 60) : nm, l.payment, "Cicilan", due, Math.min(600, n), 0, Fmt.day(due));
+        db.putBill(0, nm.length() > 60 ? nm.substring(0, 60) : nm, l.payment, "Cicilan", due, Math.min(600, n), 0, Fmt.day(due), Bill.FREQ_MONTH);
         t.s.dismiss();
         a.toast("Ditambahkan ke Rencana → Tagihan (jatuh tempo " + Fmt.dayLabel(due) + ")");
         a.render(false);
@@ -1657,7 +1660,7 @@ final class Projection {
   private void habitTool(final Ctx c) {
     final Tool t = new Tool("☕ Pangkas kebiasaan", "Kecil per hari, besar per tahun");
     final ArrayList<Forecast.Habit> hs = Forecast.habits(c.txs, c.today, 90);
-    final EditText cost = t.money("Biaya per kali", hs.isEmpty() ? 25_000 : hs.get(0).avg);
+    final EditText cost = t.money("Biaya per kali", hs.isEmpty() ? Fmt.th(25_000) : hs.get(0).avg);
     final EditText freq = t.number("Berapa kali per minggu", hs.isEmpty() ? "5" : pct1(hs.get(0).perWeek / 100).replace("%", ""), true);
     final int[] cut = {50};
     final int[] years = {5};
@@ -1693,7 +1696,7 @@ final class Projection {
         lp.rightMargin = ui.dp(6);
         String ic = db.icon(Model.EXPENSE, h.cat);
         row.addView(smallChip((ic.isEmpty() ? "" : ic + " ") + h.note + " · " + Fmt.oneDecimal(h.perWeek) + "×/mgg", false, ui.gold, new Runnable() {
-          public void run() { cost.setText(Fmt.group(h.avg)); freq.setText(Fmt.oneDecimal(h.perWeek)); }
+          public void run() { cost.setText(Fmt.num(h.avg)); freq.setText(Fmt.oneDecimal(h.perWeek)); }
         }), lp);
       }
       t.s.body.addView(ui.text("Dari catatanmu (90 hari):", 12, ui.muted), 0);
@@ -1830,7 +1833,7 @@ final class Projection {
     final Tool t = new Tool("📈 Investasi rutin & kebebasan finansial", "Bunga majemuk dengan asumsi Anda sendiri");
     long sur = Math.max(0, c.surplus());
     final EditText start = t.money("Modal awal", 0);
-    final EditText monthly = t.money("Setoran per bulan", sur > 0 ? Math.round(sur / 2 / 50_000.0) * 50_000 : 500_000);
+    final EditText monthly = t.money("Setoran per bulan", sur > 0 ? roundTo(sur / 2, Fmt.th(50_000)) : Fmt.th(500_000));
     final EditText ret = t.number("Imbal hasil (%/tahun)", "6", true);
     final EditText years = t.number("Lama (tahun)", "10", false);
     final EditText step = t.number("Kenaikan setoran (%/tahun)", "0", true);

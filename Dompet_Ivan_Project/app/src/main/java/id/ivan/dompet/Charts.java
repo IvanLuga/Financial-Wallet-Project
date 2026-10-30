@@ -376,7 +376,7 @@ final class Charts {
         c.drawLine(0, zy, w, zy, p);
         p.setPathEffect(null); p.setStyle(Paint.Style.FILL);
         p.setTextSize(dp(9.5f)); p.setTextAlign(Paint.Align.RIGHT);
-        c.drawText("Rp0", w, zy - dp(3), p);
+        c.drawText(Fmt.rp(0), w, zy - dp(3), p);
         p.setTextAlign(Paint.Align.LEFT);
       }
       for (int s = series.length - 1; s >= 0; s--) {

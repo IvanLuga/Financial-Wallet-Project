@@ -16,17 +16,18 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Cadangan JSON (schema 1–4 diterima, ekspor schema 4) dan ekspor CSV. */
+/** Cadangan JSON (schema 1–5 diterima, ekspor schema 5) dan ekspor CSV. */
 final class Backup {
   private Backup() {}
 
-  static final String[] TABLES = {"budgets", "bills", "goals", "contributions", "categories", "templates", "accounts", "debts", "wishes", "settings"};
+  static final String[] TABLES = {"budgets", "bills", "goals", "contributions", "categories", "templates", "accounts", "debts", "wishes", "settings", "trash"};
 
   static JSONObject export(Db db) throws JSONException {
     JSONObject root = new JSONObject();
     root.put("schema", Schema.BACKUP_SCHEMA);
-    root.put("app", "Dompet");
-    root.put("version", "3.5");
+    root.put("app", "Dompet Ivan");
+    root.put("version", MainActivity.VERSION);
+    root.put("currency", Fmt.cur.code);
     root.put("exported_at", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US).format(new Date()));
     JSONArray tx = new JSONArray();
     for (Tx t : db.all()) {
@@ -72,7 +73,7 @@ final class Backup {
     ArrayList<ArrayList<ContentValues>> parsed = new ArrayList<>();
     for (String table : TABLES) {
       ArrayList<ContentValues> rows = new ArrayList<>();
-      boolean present = schema >= 4
+      boolean present = table.equals("trash") ? schema >= 5 : schema >= 4
         || (schema >= 3 && Arrays.asList("budgets", "bills", "goals", "contributions", "categories", "templates").contains(table))
         || (schema >= 2 && Arrays.asList("budgets", "bills", "goals", "contributions").contains(table));
       JSONArray arr = present ? b.optJSONArray(table) : null;
@@ -93,9 +94,9 @@ final class Backup {
           case "bills": {
             long id = o.getLong("id"), amount = o.getLong("amount");
             String nm = o.getString("name"), kind = o.getString("kind"), due = o.getString("due");
-            int cycles = o.getInt("cycles"), paid = o.getInt("paid"), anchor = o.optInt("anchor", 0);
-            check(anchor >= 0 && anchor <= 31 && id > 0 && text(nm, 60, false) && amountOk(amount) && Fmt.validIso(due) && cycles >= 0 && cycles <= 600 && paid >= 0 && paid <= 600 && text(kind, 30, true), "Tagihan");
-            v.put("id", id); v.put("name", nm); v.put("kind", kind); v.put("amount", amount); v.put("due", due); v.put("cycles", cycles); v.put("paid", paid); v.put("anchor", anchor);
+            int cycles = o.getInt("cycles"), paid = o.getInt("paid"), anchor = o.optInt("anchor", 0), freq = o.optInt("freq", 0);
+            check(Model.Bill.validFreq(freq) && anchor >= 0 && anchor <= 31 && id > 0 && text(nm, 60, false) && amountOk(amount) && Fmt.validIso(due) && cycles >= 0 && cycles <= 600 && paid >= 0 && paid <= 600 && text(kind, 30, true), "Tagihan");
+            v.put("id", id); v.put("name", nm); v.put("kind", kind); v.put("amount", amount); v.put("due", due); v.put("cycles", cycles); v.put("paid", paid); v.put("anchor", anchor); v.put("freq", freq);
             break;
           }
           case "goals": {
@@ -151,9 +152,19 @@ final class Backup {
             v.put("id", id); v.put("name", name); v.put("price", price); v.put("created", created); v.put("ready", ready); v.put("status", status); v.put("note", note);
             break;
           }
+          case "trash": {
+            long id = o.getLong("id"), amount = o.getLong("amount"), acc = o.optLong("account", 1), to = o.optLong("to_account", 0);
+            int type = o.getInt("type");
+            String deleted = o.getString("deleted"), date = o.getString("date"), cat = o.getString("category"), note = o.optString("note", "");
+            check(id > 0 && Fmt.validIso(deleted) && Fmt.validIso(date) && type >= 0 && type <= 2 && amountOk(amount) && text(cat, 80, false) && text(note, 160, true) && acc > 0 && to >= 0, "Tempat sampah");
+            v.put("id", id); v.put("deleted", deleted); v.put("date", date); v.put("type", type); v.put("amount", amount);
+            v.put("category", cat); v.put("note", note); v.put("account", acc); v.put("to_account", to);
+            break;
+          }
           default: { // settings
             String key = o.getString("key"), value = o.getString("value");
             check(key.matches("[a-z0-9_]{1,40}") && value.length() <= 200, "Pengaturan");
+            if (key.equals("currency")) check(Fmt.currency(value).code.equals(value), "Mata uang");
             v.put("key", key); v.put("value", value);
           }
         }
@@ -184,7 +195,7 @@ final class Backup {
     try {
       for (String table : TABLES) d.delete(table, null, null);
       d.delete("tx", null, null);
-      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','bills','goals','contributions','templates','accounts','debts','wishes')");
+      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','bills','goals','contributions','templates','accounts','debts','wishes','trash')");
       for (Tx t : list) {
         ContentValues v = new ContentValues();
         v.put("date", t.date); v.put("type", t.type); v.put("amount", t.amount); v.put("category", t.cat); v.put("note", t.note);
@@ -199,6 +210,7 @@ final class Backup {
       Db.seedIcons(d);
       d.setTransactionSuccessful();
     } finally { d.endTransaction(); }
+    db.reloaded();
     return list.size();
   }
 
@@ -215,23 +227,24 @@ final class Backup {
   /** CSV dengan pemisah titik koma (cocok untuk Excel berbahasa Indonesia). Nominal selalu asli. */
   static String csv(Db db, Analytics.Report r, List<Tx> list) {
     StringBuilder s = new StringBuilder("﻿");
-    s.append("Laporan keuangan Dompet;").append(esc(r.label)).append("\r\n");
-    s.append("Ringkasan;Jumlah (Rp)\r\n");
-    s.append("Pemasukan;").append(r.income).append("\r\n");
-    s.append("Pengeluaran;").append(r.expense).append("\r\n");
-    s.append("Arus bersih;").append(r.net).append("\r\n");
-    s.append("Saldo keseluruhan saat ekspor;").append(db.total()).append("\r\n\r\n");
-    s.append("Kategori pengeluaran;Jumlah (Rp);Porsi\r\n");
+    String code = Fmt.cur.code;
+    s.append("Laporan keuangan Dompet Ivan;").append(esc(r.label)).append("\r\n");
+    s.append("Ringkasan;Jumlah (").append(code).append(")\r\n");
+    s.append("Pemasukan;").append(Fmt.plain(r.income)).append("\r\n");
+    s.append("Pengeluaran;").append(Fmt.plain(r.expense)).append("\r\n");
+    s.append("Arus bersih;").append(Fmt.plain(r.net)).append("\r\n");
+    s.append("Saldo keseluruhan saat ekspor;").append(Fmt.plain(db.total())).append("\r\n\r\n");
+    s.append("Kategori pengeluaran;Jumlah (").append(code).append(");Porsi\r\n");
     for (java.util.Map.Entry<String, Long> e : r.byCat.entrySet())
-      s.append(esc(e.getKey())).append(';').append(e.getValue()).append(';').append(r.expense == 0 ? "0%" : Fmt.pct((double) e.getValue() / r.expense)).append("\r\n");
-    s.append("\r\nTanggal;Jenis;Kategori;Akun;Ke akun;Catatan;Jumlah (Rp)\r\n");
+      s.append(esc(e.getKey())).append(';').append(Fmt.plain(e.getValue())).append(';').append(r.expense == 0 ? "0%" : Fmt.pct((double) e.getValue() / r.expense)).append("\r\n");
+    s.append("\r\nTanggal;Jenis;Kategori;Akun;Ke akun;Catatan;Jumlah (").append(code).append(")\r\n");
     java.util.HashMap<Long, String> names = new java.util.HashMap<>();
     for (Model.Account x : db.accounts(true)) names.put(x.id, x.name);
     for (Tx t : list) {
       s.append(t.date).append(';').append(t.type == 1 ? "Pemasukan" : t.type == 0 ? "Pengeluaran" : "Transfer").append(';')
         .append(esc(t.cat)).append(';').append(esc(name(names, t.account))).append(';')
         .append(t.type == Model.TRANSFER ? esc(name(names, t.toAccount)) : "").append(';')
-        .append(esc(t.note)).append(';').append(t.amount).append("\r\n");
+        .append(esc(t.note)).append(';').append(Fmt.plain(t.amount)).append("\r\n");
     }
     return s.toString();
   }

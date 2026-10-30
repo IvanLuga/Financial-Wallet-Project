@@ -187,6 +187,29 @@ final class Simulator {
     return out;
   }
 
+  /** Konversi skenario tersimpan saat mata uang diganti (4.0). Teks rusak dibiarkan apa adanya. */
+  static String convertInput(String s, int decFrom, int decTo, double rate) {
+    Input x = decode(s);
+    if (x == null) return s == null ? "" : s;
+    long cap = Fmt.MAX_AMOUNT * 10;
+    x.start = conv(x.start, decFrom, decTo, rate, cap);
+    x.income = conv(x.income, decFrom, decTo, rate, cap);
+    x.expense = conv(x.expense, decFrom, decTo, rate, cap);
+    x.cut = conv(x.cut, decFrom, decTo, rate, cap);
+    return encode(x);
+  }
+
+  static String convertEvents(String s, int decFrom, int decTo, double rate) {
+    ArrayList<Event> ev = decodeEvents(s);
+    for (Event e : ev) e.amount = conv(e.amount, decFrom, decTo, rate, Fmt.MAX_AMOUNT);
+    return encodeEvents(ev);
+  }
+
+  private static long conv(long v, int decFrom, int decTo, double rate, long cap) {
+    long n = Fmt.convert(v, decFrom, decTo, rate, cap);
+    return n == Fmt.OVERFLOW ? (v < 0 ? -cap : cap) : n;
+  }
+
   // ======================= Alat: target tabungan =======================
 
   /** Bulan sampai target tercapai dengan setoran bulanan tetap; -1 bila lebih dari 100 tahun. */

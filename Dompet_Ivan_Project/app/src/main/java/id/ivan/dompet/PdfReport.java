@@ -76,7 +76,7 @@ final class PdfReport {
     c.drawColor(Color.WHITE);
     if (pageNo > 1) {
       font(9, true, TEAL);
-      c.drawText("DOMPET · LAPORAN KEUANGAN", L, 40, p);
+      c.drawText("DOMPET IVAN · LAPORAN KEUANGAN", L, 40, p);
       font(9, false, MUTED);
       p.setTextAlign(Paint.Align.RIGHT);
       c.drawText(d.r.label, R, 40, p);
@@ -89,7 +89,7 @@ final class PdfReport {
   private void footer() {
     font(8, false, MUTED);
     line(L, PH - 34, R, PH - 34, LINE, 0.6f);
-    c.drawText("Dompet 3.5 · offline · dibuat " + Fmt.dayLabel(Fmt.today()), L, PH - 22, p);
+    c.drawText(MainActivity.APP_NAME + " · offline · dibuat " + Fmt.dayLabel(Fmt.today()), L, PH - 22, p);
     p.setTextAlign(Paint.Align.RIGHT);
     c.drawText("Halaman " + pageNo, R, PH - 22, p);
     p.setTextAlign(Paint.Align.LEFT);
@@ -157,7 +157,7 @@ final class PdfReport {
     c.drawRect(0, 0, PW, 150, p);
     p.setShader(null);
     font(10, true, 0xFFA7E3D8);
-    c.drawText("DOMPET 3.5 · LAPORAN KEUANGAN PRIBADI", L, 44, p);
+    c.drawText(MainActivity.APP_NAME.toUpperCase() + " · LAPORAN KEUANGAN PRIBADI · " + Fmt.cur.code, L, 44, p);
     font(26, true, Color.WHITE);
     c.drawText(r.label, L, 82, p);
     font(10, false, 0xFFD5EFEA);
@@ -255,7 +255,7 @@ final class PdfReport {
     if (!bills.isEmpty()) {
       section("Tagihan & cicilan aktif", "30 hari: " + Fmt.rp(db.upcomingTotal(30)));
       ArrayList<String[]> rows = new ArrayList<>();
-      for (Bill b : bills) rows.add(new String[]{b.name, b.kind, Fmt.dayLabel(b.due), b.cycles > 0 ? b.paid + "/" + b.cycles : "berulang", Fmt.rp(b.amount)});
+      for (Bill b : bills) rows.add(new String[]{b.name, b.kind + (b.monthly() ? "" : " · " + Bill.freqName(b.freq)), Fmt.dayLabel(b.due), b.cycles > 0 ? b.paid + "/" + b.cycles : "berulang", Fmt.rp(b.amount)});
       table(new String[]{"Nama", "Jenis", "Jatuh tempo", "Progres", "Jumlah"}, new float[]{0.32f, 0.15f, 0.2f, 0.13f, 0.2f}, new boolean[]{false, false, false, true, true}, rows);
     }
 
@@ -500,7 +500,7 @@ final class PdfReport {
       String[] row = rows.get(i);
       for (int k = 0; k < head.length; k++) {
         float w = W * widths[k];
-        boolean money = right[k] && row[k].contains("Rp");
+        boolean money = right[k] && row[k].contains(Fmt.sym().trim());
         font(8.5f, false, money && row[k].startsWith("-") ? RED : money && row[k].startsWith("+") ? GREEN : DARK);
         String s = fit(row[k] == null ? "" : row[k], w - 8);
         if (right[k]) { p.setTextAlign(Paint.Align.RIGHT); c.drawText(s, x + w - 4, y, p); p.setTextAlign(Paint.Align.LEFT); }

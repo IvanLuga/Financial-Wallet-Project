@@ -68,7 +68,7 @@ final class Forms {
       t.account = db.settingLong("default_account", 1);
       if (db.account(t.account) == null || db.account(t.account).archived) t.account = 1;
     }
-    final String[] expr = {t.amount > 0 ? Long.toString(t.amount) : ""};
+    final String[] expr = {t.amount > 0 ? Fmt.plain(t.amount) : ""};
     final Ui.Sheet s = ui.sheet(existing ? "Ubah transaksi" : "Catat transaksi", null);
     final LinearLayout b = s.body;
 
@@ -82,7 +82,7 @@ final class Forms {
     ui.pad(amountBox, 16, 12, 16, 12);
     final TextView exprView = ui.text("", 13, ui.muted);
     exprView.setGravity(Gravity.END);
-    final TextView amountView = ui.title("Rp0", 32);
+    final TextView amountView = ui.title(Fmt.rp(0), 32);
     amountView.setGravity(Gravity.END);
     amountView.setSingleLine(true);
     amountBox.addView(exprView);
@@ -91,9 +91,8 @@ final class Forms {
     // Nominal cepat
     LinearLayout quick = ui.row();
     ui.pad(quick, 0, 8, 0, 4);
-    long[] q = {5_000, 10_000, 20_000, 50_000, 100_000};
-    for (final long v : q) {
-      TextView c = ui.chip("+" + Fmt.compact(v).replace("Rp", ""), false, ui.primary);
+    for (final long v : Fmt.quickAmounts()) {
+      TextView c = ui.chip("+" + Fmt.compact(v).replace(Fmt.sym(), ""), false, ui.primary);
       c.setTextSize(12);
       LinearLayout.LayoutParams p = Ui.weight(1);
       p.rightMargin = ui.dp(5);
@@ -102,14 +101,16 @@ final class Forms {
         public void run() {
           long cur;
           try { cur = expr[0].isEmpty() ? 0 : Fmt.calc(expr[0]); } catch (Exception e) { cur = 0; }
-          expr[0] = Long.toString(Math.min(Fmt.MAX_AMOUNT, cur + v));
+          expr[0] = Fmt.plain(Math.min(Fmt.MAX_AMOUNT, cur + v));
           refreshAmount(expr[0], exprView, amountView, typeColor(t.type));
         }
       });
     }
     b.addView(quick);
     // Keypad kalkulator
-    final String[] keys = {"7", "8", "9", "⌫", "4", "5", "6", "+", "1", "2", "3", "−", "000", "0", "×", "÷"};
+    // Mata uang bersen: tombol "000" diganti koma desimal.
+    final boolean decimal = Fmt.cur.dec > 0;
+    final String[] keys = {"7", "8", "9", "⌫", "4", "5", "6", "+", "1", "2", "3", "−", decimal ? "," : "000", "0", "×", "÷"};
     LinearLayout pad = ui.col();
     for (int r = 0; r < 4; r++) {
       LinearLayout row = ui.row();
@@ -131,9 +132,16 @@ final class Forms {
               char last = e.charAt(e.length() - 1);
               if ("+−×÷".indexOf(last) >= 0) e = e.substring(0, e.length() - 1);
               e += k;
+            } else if (k.equals(",")) {
+              String last = lastNumber(e);
+              if (last.contains(",") || e.length() >= 40) return;
+              e += last.isEmpty() ? "0," : ",";
             } else {
               if (e.length() >= 40) return;
-              if (e.equals("0") || e.endsWith("+0") || e.endsWith("−0") || e.endsWith("×0") || e.endsWith("÷0")) e = e.substring(0, e.length() - 1);
+              String last = lastNumber(e);
+              int comma = last.indexOf(',');
+              if (comma >= 0 && last.length() - comma - 1 + k.length() > Fmt.cur.dec) return;
+              if (comma < 0 && (e.equals("0") || e.endsWith("+0") || e.endsWith("−0") || e.endsWith("×0") || e.endsWith("÷0"))) e = e.substring(0, e.length() - 1);
               e += k;
               if (e.startsWith("000")) e = "";
             }
@@ -359,23 +367,37 @@ final class Forms {
     }
   }
 
+  /** Angka terakhir pada ekspresi keypad (setelah operator terakhir), mis. "12+3,5" -> "3,5". */
+  static String lastNumber(String e) {
+    int i = e.length();
+    while (i > 0 && (Character.isDigit(e.charAt(i - 1)) || e.charAt(i - 1) == ',')) i--;
+    return e.substring(i);
+  }
+
   static String prettyExpr(String e) {
     StringBuilder out = new StringBuilder(), num = new StringBuilder();
     for (int i = 0; i < e.length(); i++) {
       char ch = e.charAt(i);
-      if (Character.isDigit(ch)) num.append(ch);
+      if (Character.isDigit(ch) || ch == ',') num.append(ch);
       else {
-        if (num.length() > 0) { out.append(num.length() > 15 ? num : Fmt.group(Long.parseLong(num.toString()))); num.setLength(0); }
+        if (num.length() > 0) { out.append(prettyNumber(num.toString())); num.setLength(0); }
         out.append(' ').append(ch).append(' ');
       }
     }
-    if (num.length() > 0) out.append(num.length() > 15 ? num : Fmt.group(Long.parseLong(num.toString())));
+    if (num.length() > 0) out.append(prettyNumber(num.toString()));
     return out.toString();
+  }
+
+  private static String prettyNumber(String n) {
+    int comma = n.indexOf(',');
+    String whole = comma < 0 ? n : n.substring(0, comma);
+    String w = whole.isEmpty() ? "0" : whole.length() > 15 ? whole : Fmt.group(Long.parseLong(whole));
+    return comma < 0 ? w : w + n.substring(comma);
   }
 
   private void refreshAmount(String e, TextView exprView, TextView amountView, int color) {
     amountView.setTextColor(color);
-    if (e.isEmpty()) { exprView.setText("Ketik nominal · bisa dihitung, mis. 25000+12000"); amountView.setText("Rp0"); return; }
+    if (e.isEmpty()) { exprView.setText(Fmt.cur.dec > 0 ? "Ketik nominal · koma untuk sen, mis. 12,50+3" : "Ketik nominal · bisa dihitung, mis. 25000+12000"); amountView.setText(Fmt.rp(0)); return; }
     if (Fmt.hasOperator(e)) {
       exprView.setText(prettyExpr(e));
       try { amountView.setText("= " + Fmt.rp(Fmt.calc(e))); } catch (Exception x) { amountView.setText("…"); }
@@ -392,11 +414,12 @@ final class Forms {
     }).start();
   }
 
+  /** Hapus = pindah ke tempat sampah (30 hari); Urungkan mengembalikannya. */
   void deleteTx(final Tx t) {
-    db.delete(t.id);
+    final long trashId = db.moveToTrash(t);
     a.render(false);
-    a.snack("Transaksi dihapus", "Urungkan", new Runnable() {
-      public void run() { Tx back = t.copy(); back.id = 0; db.put(back); a.render(false); }
+    a.snack("Dipindah ke tempat sampah", "Urungkan", new Runnable() {
+      public void run() { if (db.restoreTrash(trashId) == null) a.toast("Tidak bisa dipulihkan"); a.render(false); }
     });
   }
 
@@ -554,7 +577,7 @@ final class Forms {
           if (!cat[0].isEmpty() && !t.cat.equals(cat[0])) continue;
           if (acc[0] > 0 && t.account != acc[0] && t.toAccount != acc[0]) continue;
           if (!term.isEmpty() && !t.cat.toLowerCase().contains(term) && !t.note.toLowerCase().contains(term)
-            && (digits.isEmpty() || !Long.toString(t.amount).contains(digits))) continue;
+            && (digits.isEmpty() || !Fmt.plain(t.amount).replaceAll("[^0-9]", "").contains(digits))) continue;
           out.add(t);
         }
         StringBuilder sum = new StringBuilder(all[0] ? "Semua waktu" : Fmt.rangeLabel(range[0], range[1]));
@@ -828,21 +851,21 @@ final class Forms {
   }
 
   void welcome(boolean fresh) {
-    final Ui.Sheet s = ui.sheet(fresh ? "Selamat datang di Dompet 3.5" : "Yang baru di Dompet 3.5", fresh ? "Pencatat keuangan offline — data hanya di HP ini" : "Semua data Anda tetap utuh");
+    final Ui.Sheet s = ui.sheet(fresh ? "Selamat datang di " + MainActivity.APP_NAME : "Yang baru di " + MainActivity.APP_NAME, fresh ? "Pencatat keuangan offline — data hanya di HP ini" : "Semua data Anda tetap utuh");
     String[][] items = fresh ? new String[][]{
       {"🔮", "Prediksi & simulasi", "Perkiraan harian, bulanan, tahunan + uji skenario \"bagaimana jika\""},
       {"📊", "Wawasan & laporan PDF", "Skor kesehatan, tren, kalender, pola hari, ekspor PDF bergrafik"},
       {"🛡️", "Kontrol & peringatan boros", "Batas bulanan/mingguan/harian, kecepatan belanja, notifikasi otomatis"},
       {"👛", "Multi-akun & transfer", "Tunai, bank, e-wallet dengan saldo masing-masing"},
-      {"🧮", "Keypad kalkulator", "Ketik 25000+12000 langsung di nominal"},
-      {"🌙", "Mode gelap & PIN", "Tema mengikuti sistem, kunci aplikasi dengan PIN"}
+      {"💱", "Pilih mata uang", "Rupiah, dolar, euro, ringgit, yen, dan lainnya (menu •••)"},
+      {"🌙", "Mode gelap, PIN & sidik jari", "Tema mengikuti sistem, kunci aplikasi dengan PIN atau sidik jari"}
     } : new String[][]{
-      {"🔮", "Tab baru: Proyeksi", "Prediksi pengeluaran & saldo harian, akhir bulan, 12 bulan, dan tahunan"},
-      {"🎛️", "Simulasi bagaimana jika", "Harian/bulanan/tahunan, penggeser ±%, pangkas kategori, peristiwa, skenario tersimpan"},
-      {"🧰", "5 alat perencanaan", "Target tabungan, cicilan & bunga efektif, kebiasaan, dana darurat, investasi & kebebasan finansial"},
-      {"🔁", "Deteksi transaksi rutin", "Gaji, kos, dan tagihan bulanan dikenali otomatis untuk arus kas"},
-      {"🔔", "Peringatan prediktif", "Notifikasi bila saldo diprediksi minus atau amplop akan habis"},
-      {"📄", "PDF dengan proyeksi", "Laporan bulan berjalan kini memuat prediksi & 6 bulan ke depan"}
+      {"💱", "Ganti mata uang", "18 mata uang, sen/desimal, konversi semua nominal dengan kurs Anda sendiri"},
+      {"🧹", "Reset keuangan yang aman", "Mulai dari nol seperti baru; dilindungi PIN, ketik RESET, dan bisa dibatalkan 7 hari"},
+      {"🗑️", "Tempat sampah", "Transaksi terhapus disimpan 30 hari dan bisa dipulihkan"},
+      {"🔁", "Tagihan fleksibel", "Mingguan, 2 mingguan, bulanan, 3/6 bulanan, atau tahunan (pajak, asuransi)"},
+      {"👆", "Buka dengan sidik jari", "Aktifkan di menu → PIN (perlu PIN dan sensor sidik jari)"},
+      {"🛠️", "Perbaikan & keamanan", "Jeda setelah PIN salah berkali-kali, perbaikan ikon setelah pulihkan, dan lainnya"}
     };
     for (String[] it : items) {
       LinearLayout row = ui.row();
@@ -862,20 +885,21 @@ final class Forms {
         public void run() { s.dismiss(); Tx t = new Tx(); t.date = Fmt.today(); t.type = Model.INCOME; t.cat = "Saldo awal"; tx(t); }
       });
     } else {
-      s.secondary("Lihat prediksi", ui.primary, new Runnable() { public void run() { s.dismiss(); a.go(MainActivity.TAB_PROJECT); } });
+      s.secondary("Buka menu", ui.primary, new Runnable() { public void run() { s.dismiss(); a.settingsMenu(); } });
       s.primary("Mulai", ui.primary, new Runnable() { public void run() { s.dismiss(); } });
     }
     s.show();
   }
 
   void about() {
-    ui.info("Tentang Dompet 3.5",
-      "Versi 3.5 (kode 5) · paket id.ivan.dompet\n\n" +
+    ui.info("Tentang " + MainActivity.APP_NAME,
+      "Versi " + MainActivity.VERSION + " (kode " + MainActivity.VERSION_CODE + ") · paket id.ivan.dompet · mata uang " + Fmt.cur.code + "\n\n" +
       "• Offline: tanpa akun, iklan, server, atau izin internet. Data hanya di HP ini — cadangkan berkala.\n" +
       "• Notifikasi bergantung pada izin notifikasi dan penghemat baterai; waktunya bisa bergeser beberapa menit hingga jam.\n" +
       "• Skor kesehatan, wawasan, prediksi, dan simulasi dihitung dari data & asumsi Anda. Ini alat bantu, bukan nasihat keuangan profesional; imbal hasil investasi tidak dijamin.\n" +
+      "• Kurs mata uang tidak diambil dari internet. Konversi memakai kurs yang Anda ketik sendiri.\n" +
       "• Mode privasi hanya menyamarkan tampilan; berkas PDF/CSV/JSON tetap berisi nominal asli.\n" +
-      "• PIN tidak bisa dipulihkan jika lupa.");
+      "• PIN tidak bisa dipulihkan jika lupa. Sidik jari hanya pintasan untuk PIN.");
   }
 
   static int white() { return Color.WHITE; }

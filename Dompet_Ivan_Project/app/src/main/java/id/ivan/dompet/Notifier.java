@@ -25,7 +25,7 @@ final class Notifier {
   static boolean hidden(Context c) { return c.getSharedPreferences("display", 0).getBoolean("hide", false); }
 
   /** Nominal untuk notifikasi; disamarkan bila mode privasi aktif. */
-  static String money(Context c, long n) { return hidden(c) ? "Rp •••" : Fmt.rp(n); }
+  static String money(Context c, long n) { return hidden(c) ? Fmt.masked() : Fmt.rp(n); }
 
   static void channels(Context c) {
     if (Build.VERSION.SDK_INT < 26) return;

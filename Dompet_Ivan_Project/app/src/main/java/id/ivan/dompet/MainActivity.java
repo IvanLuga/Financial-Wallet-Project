@@ -35,6 +35,8 @@ import java.util.Calendar;
 
 /** Kerangka aplikasi: header, navigasi bawah, tema, kunci PIN, menu pengaturan, dan ekspor/impor berkas. */
 public class MainActivity extends Activity {
+  static final String APP_NAME = "Dompet Ivan v4.0", VERSION = "4.0";
+  static final int VERSION_CODE = 6;
   static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
@@ -53,6 +55,7 @@ public class MainActivity extends Activity {
   Plan plan;
   Projection projection;
   Forms forms;
+  DataTools tools;
 
   private FrameLayout root;
   private LinearLayout shell;
@@ -73,6 +76,9 @@ public class MainActivity extends Activity {
   String pendingCsv;
   private boolean pickingFile, locked;
   private long stoppedAt;
+  private android.os.CancellationSignal fpSignal;
+  private Runnable lockUnlocked;
+  private TextView lockMsg;
 
   final Ui.Money moneyF = new Ui.Money() { public String f(long n) { return money(n); } };
 
@@ -87,6 +93,7 @@ public class MainActivity extends Activity {
     boolean dark = themePref == 2 || (themePref == 0 && systemDark);
     ui = new Ui(this, dark, prefs.getBoolean("animate", true));
     db = new Db(this);
+    db.getReadableDatabase(); // membuka database = memuat mata uang aktif sebelum layar digambar
     period = Fmt.period(Fmt.today());
     if (state != null) {
       tab = state.getInt("tab", 0);
@@ -106,6 +113,7 @@ public class MainActivity extends Activity {
     plan = new Plan(this);
     projection = new Projection(this);
     forms = new Forms(this);
+    tools = new DataTools(this);
 
     Notifier.channels(this);
     ReminderReceiver.schedule(this);
@@ -120,10 +128,25 @@ public class MainActivity extends Activity {
       prefs.edit().putBoolean("asked_notif", true).apply();
       requestPermissions(new String[]{Notifier.PERMISSION}, REQ_NOTIF);
     }
-    if (!prefs.getBoolean("seen_v35", false)) {
-      prefs.edit().putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
+    db.purgeOldTrash();
+    tools.undoUntil(); // menghapus salinan reset yang sudah kedaluwarsa
+    if (prefs.getBoolean("welcome_fresh", false)) {
+      prefs.edit().putBoolean("welcome_fresh", false).putBoolean("seen_v40", true).apply();
+      handler.postDelayed(new Runnable() { public void run() { forms.welcome(true); } }, 450);
+    } else if (!prefs.getBoolean("seen_v40", false)) {
+      prefs.edit().putBoolean("seen_v40", true).putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
       handler.postDelayed(new Runnable() { public void run() { forms.welcome(db.txCount() == 0); } }, 450);
     }
+  }
+
+  @Override protected void onResume() {
+    super.onResume();
+    if (locked) startFingerprint();
+  }
+
+  @Override protected void onPause() {
+    super.onPause();
+    stopFingerprint();
   }
 
   @Override protected void onSaveInstanceState(Bundle s) {
@@ -177,9 +200,9 @@ public class MainActivity extends Activity {
 
   // ---------------- Format ----------------
 
-  String money(long n) { return hide ? "Rp •••••" : Fmt.rp(n); }
+  String money(long n) { return hide ? Fmt.masked() : Fmt.rp(n); }
 
-  String signed(long n) { return hide ? "Rp •••••" : Fmt.signed(n); }
+  String signed(long n) { return hide ? Fmt.masked() : Fmt.signed(n); }
 
   void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
 
@@ -198,7 +221,7 @@ public class MainActivity extends Activity {
     head.addView(top);
     LinearLayout titles = ui.col();
     top.addView(titles, Ui.weight(1));
-    titleView = ui.title("Dompet", 24);
+    titleView = ui.title("Dompet Ivan", 24);
     subtitleView = ui.text("", 12.5f, ui.muted);
     titles.addView(titleView);
     titles.addView(subtitleView);
@@ -458,22 +481,35 @@ public class MainActivity extends Activity {
   // ---------------- Menu pengaturan ----------------
 
   void settingsMenu() {
-    final Ui.Sheet s = ui.sheet("Menu", "Dompet 3.5 · offline, tanpa akun dan iklan");
+    final Ui.Sheet s = ui.sheet("Menu", APP_NAME + " · offline, tanpa akun dan iklan");
     s.item("👤", "Nama panggilan", db.setting("name", "").isEmpty() ? "Untuk sapaan di beranda" : db.setting("name", ""), ui.primary, new Runnable() { public void run() { forms.editName(); } });
     s.item("👛", "Kelola akun & dompet", "Tunai, bank, e-wallet, transfer antar-akun", ui.blue, new Runnable() { public void run() { forms.accounts(); } });
     s.item("🏷️", "Kelola kategori", "Tambah, ubah nama/ikon, hapus", ui.purple, new Runnable() { public void run() { forms.categories(0); } });
     s.item("⚡", "Template transaksi cepat", db.templates().size() + " template", ui.gold, new Runnable() { public void run() { forms.templates(); } });
+    s.item(Fmt.cur.flag, "Mata uang", DataTools.label(Fmt.cur), ui.green, new Runnable() { public void run() { tools.currencyMenu(); } });
+    long trash = db.trashCount();
+    s.item("🗑️", "Tempat sampah", trash == 0 ? "Kosong · transaksi terhapus disimpan " + Db.TRASH_DAYS + " hari" : trash + " transaksi · bisa dipulihkan", ui.muted, new Runnable() { public void run() { tools.trash(); } });
     s.item("🎨", "Tema tampilan", new String[]{"Ikuti sistem", "Terang", "Gelap"}[prefs.getInt("theme", 0)], ui.primary, new Runnable() { public void run() { themeMenu(); } });
     s.item("✨", ui.animate ? "Matikan animasi" : "Aktifkan animasi", "Animasi transisi, grafik, dan angka", ui.blue, new Runnable() {
       public void run() { prefs.edit().putBoolean("animate", !ui.animate).apply(); recreate(); }
     });
     s.item(hide ? "🙈" : "👁️", hide ? "Tampilkan nominal" : "Sembunyikan nominal", "Privasi tampilan & notifikasi", ui.muted, new Runnable() { public void run() { togglePrivacy(); } });
-    s.item("🔒", hasPin() ? "Ubah / hapus PIN" : "Kunci dengan PIN", "Kunci saat aplikasi dibuka", ui.red, new Runnable() { public void run() { pinMenu(); } });
+    s.item("🔒", hasPin() ? "Ubah / hapus PIN" : "Kunci dengan PIN", hasPin() ? (fingerprintOn() ? "PIN + sidik jari aktif" : "PIN aktif · sidik jari bisa diaktifkan") : "Kunci saat aplikasi dibuka", ui.red, new Runnable() { public void run() { pinMenu(); } });
     s.item("💾", "Cadangkan data (JSON)", lastBackupLabel(), ui.green, new Runnable() { public void run() { backup(); } });
     s.item("♻️", "Pulihkan dari cadangan", "Mengganti semua data di HP ini", ui.gold, new Runnable() { public void run() { restorePrompt(); } });
     s.item("📐", "Asumsi proyeksi", "Kenaikan pemasukan " + Projection.pct1(Projection.assumption(db, "asm_inc", 30)) + " · inflasi " + Projection.pct1(Projection.assumption(db, "asm_infl", 30)) + " · imbal hasil " + Projection.pct1(Projection.assumption(db, "asm_ret", 0)), ui.purple, new Runnable() { public void run() { projection.assumptions(); } });
     s.item("🔔", "Pengaturan notifikasi", "Batas, jam pengecekan, jenis pengingat", ui.primary, new Runnable() { public void run() { tab = TAB_CONTROL; period = Fmt.period(Fmt.today()); render(true); handler.postDelayed(new Runnable() { public void run() { control.scrollToSettings(); } }, 400); } });
-    s.item("ℹ️", "Tentang Dompet 3.5", "Versi, privasi, batasan", ui.muted, new Runnable() { public void run() { forms.about(); } });
+    s.item("ℹ️", "Tentang " + APP_NAME, "Versi, privasi, batasan", ui.muted, new Runnable() { public void run() { forms.about(); } });
+    TextView danger = ui.caps("Zona berbahaya", ui.red);
+    ui.pad(danger, 6, 16, 0, 4);
+    s.body.addView(danger);
+    long until = tools.undoUntil();
+    if (until > 0) {
+      Calendar c = Calendar.getInstance();
+      c.setTimeInMillis(until);
+      s.item("↩️", "Batalkan reset terakhir", "Kembalikan data sebelum reset · sampai " + Fmt.dayLabel(Fmt.iso(c)), ui.gold, new Runnable() { public void run() { tools.undoReset(); } });
+    }
+    s.item("🧹", "Reset keuangan", "Hapus semua data, mulai dari nol · dengan pengaman", ui.red, new Runnable() { public void run() { tools.reset(); } });
     s.show();
   }
 
@@ -510,6 +546,30 @@ public class MainActivity extends Activity {
 
   boolean checkPin(String pin) { return hash(prefs.getString("pin_salt", ""), pin).equals(prefs.getString("pin_hash", "")); }
 
+  boolean fingerprintOn() { return hasPin() && prefs.getBoolean("fp", false); }
+
+  /** Jeda setelah PIN salah: 5× salah = 30 dtk, lalu berlipat (maks. 15 menit). Bertahan walau aplikasi ditutup. */
+  static long lockoutMs(int fails) {
+    if (fails < 5) return 0;
+    long ms = 30_000L << Math.min(5, (fails - 5) / 5);
+    return Math.min(ms, 15 * 60_000L);
+  }
+
+  private void startFingerprint() {
+    if (fpSignal != null || lockUnlocked == null || !fingerprintOn()) return;
+    fpSignal = Fingerprint.listen(this, new Fingerprint.Listener() {
+      public void success() { fpSignal = null; if (lockUnlocked != null) lockUnlocked.run(); }
+      public void message(String text, boolean fatal) {
+        if (fatal) fpSignal = null;
+        if (lockMsg != null) { lockMsg.setText(text); lockMsg.setTextColor(fatal ? ui.muted : ui.red); }
+      }
+    });
+  }
+
+  private void stopFingerprint() {
+    if (fpSignal != null) { try { fpSignal.cancel(); } catch (Exception ignored) {} fpSignal = null; }
+  }
+
   void savePin(String pin) {
     byte[] r = new byte[16];
     new SecureRandom().nextBytes(r);
@@ -522,10 +582,19 @@ public class MainActivity extends Activity {
     if (!hasPin()) { forms.pinSetup(); return; }
     final Ui.Sheet s = ui.sheet("PIN aplikasi", "PIN diminta saat membuka aplikasi atau kembali setelah 30 detik.");
     s.item("🔁", "Ubah PIN", null, ui.primary, new Runnable() { public void run() { forms.pinSetup(); } });
+    if (Fingerprint.hardware(this))
+      s.item("👆", fingerprintOn() ? "Matikan sidik jari" : "Buka dengan sidik jari", fingerprintOn() ? "Aktif · PIN tetap bisa dipakai" : "Pintasan untuk PIN di layar kunci", ui.blue, new Runnable() {
+        public void run() {
+          if (fingerprintOn()) { prefs.edit().putBoolean("fp", false).apply(); toast("Sidik jari dimatikan"); return; }
+          if (!Fingerprint.ready(MainActivity.this)) { ui.info("Belum ada sidik jari", "Daftarkan sidik jari dulu di Pengaturan Android → Keamanan → Sidik jari, lalu aktifkan lagi di sini."); return; }
+          prefs.edit().putBoolean("fp", true).apply();
+          toast("Sidik jari aktif");
+        }
+      });
     s.item("🗑️", "Hapus PIN", null, ui.red, new Runnable() {
       public void run() {
         ui.confirm("Hapus PIN?", "Aplikasi akan terbuka tanpa PIN.", "Hapus", ui.red, new Runnable() {
-          public void run() { prefs.edit().remove("pin_hash").remove("pin_salt").remove("pin_len").apply(); toast("PIN dihapus"); }
+          public void run() { prefs.edit().remove("pin_hash").remove("pin_salt").remove("pin_len").remove("fp").remove("pin_fail").remove("pin_wait").apply(); toast("PIN dihapus"); }
         });
       }
     });
@@ -542,8 +611,23 @@ public class MainActivity extends Activity {
     TextView logo = ui.badge("👛", "D", ui.primary, 76);
     lock.addView(logo);
     ui.gap(lock, 18);
-    lock.addView(ui.title("Dompet terkunci", 22));
-    final TextView msg = ui.text("Masukkan PIN " + len + " digit", 14, ui.muted);
+    lock.addView(ui.title("Dompet Ivan terkunci", 22));
+    final TextView msg = ui.text(fingerprintOn() && Fingerprint.ready(this) ? "👆 Sentuh sensor sidik jari atau masukkan PIN" : "Masukkan PIN " + len + " digit", 14, ui.muted);
+    msg.setGravity(Gravity.CENTER);
+    lockMsg = msg;
+    lockUnlocked = new Runnable() {
+      public void run() {
+        if (!locked) return;
+        stopFingerprint();
+        locked = false;
+        lockUnlocked = null;
+        lockMsg = null;
+        prefs.edit().remove("pin_fail").remove("pin_wait").apply();
+        setContentView(root);
+        render(false);
+        afterStart();
+      }
+    };
     ui.gap(lock, 6);
     lock.addView(msg);
     ui.gap(lock, 22);
@@ -577,18 +661,25 @@ public class MainActivity extends Activity {
           key.setBackground(ui.ripple(ui.round(ui.surface, 40), Ui.alpha(ui.primary, 0.2f)));
           ui.click(key, new Runnable() {
             public void run() {
+              long wait = prefs.getLong("pin_wait", 0) - System.currentTimeMillis();
+              if (wait > 0) {
+                msg.setText("Terlalu banyak salah. Coba lagi dalam " + ((wait + 999) / 1000) + " detik");
+                msg.setTextColor(ui.red);
+                return;
+              }
               if (k.equals("⌫")) { if (entry.length() > 0) entry.setLength(entry.length() - 1); }
               else if (entry.length() < len) entry.append(k);
               draw.run();
               if (entry.length() == len) {
                 if (checkPin(entry.toString())) {
-                  locked = false;
-                  setContentView(root);
-                  render(false);
-                  afterStart();
+                  Runnable u = lockUnlocked; // bisa null bila sidik jari baru saja membuka kunci
+                  if (u != null) u.run();
                 } else {
                   entry.setLength(0);
-                  msg.setText("PIN salah, coba lagi");
+                  int fails = prefs.getInt("pin_fail", 0) + 1;
+                  long lockout = lockoutMs(fails);
+                  prefs.edit().putInt("pin_fail", fails).putLong("pin_wait", lockout > 0 ? System.currentTimeMillis() + lockout : 0).apply();
+                  msg.setText(lockout > 0 ? "PIN salah " + fails + "×. Tunggu " + (lockout / 1000) + " detik" : "PIN salah, coba lagi");
                   msg.setTextColor(ui.red);
                   dots.animate().translationX(ui.dp(12)).setDuration(60).withEndAction(new Runnable() {
                     public void run() { dots.animate().translationX(-ui.dp(10)).setDuration(60).withEndAction(new Runnable() { public void run() { dots.animate().translationX(0).setDuration(60).start(); } }).start(); }
@@ -609,7 +700,7 @@ public class MainActivity extends Activity {
     ui.gap(lock, 18);
     lock.addView(ui.link("Lupa PIN?", ui.muted, new Runnable() {
       public void run() {
-        ui.info("Lupa PIN", "Demi keamanan, PIN tidak bisa dipulihkan tanpa akun atau server. Satu-satunya cara: hapus data aplikasi lewat Pengaturan Android → Aplikasi → Dompet → Penyimpanan → Hapus data, lalu pulihkan dari berkas cadangan JSON terakhir. Transaksi setelah cadangan terakhir akan hilang.");
+        ui.info("Lupa PIN", "Demi keamanan, PIN tidak bisa dipulihkan tanpa akun atau server. Satu-satunya cara: hapus data aplikasi lewat Pengaturan Android → Aplikasi → Dompet Ivan → Penyimpanan → Hapus data, lalu pulihkan dari berkas cadangan JSON terakhir. Transaksi setelah cadangan terakhir akan hilang.");
       }
     }));
     ScrollView sc = new ScrollView(this);
@@ -617,6 +708,7 @@ public class MainActivity extends Activity {
     sc.setBackgroundColor(ui.bg);
     sc.addView(content);
     setContentView(sc);
+    startFingerprint();
   }
 
   // ---------------- Berkas: ekspor & impor ----------------
@@ -628,15 +720,15 @@ public class MainActivity extends Activity {
 
   void savePdf(PdfReport.Data d) {
     pendingPdf = d;
-    createFile(REQ_PDF, "Laporan_Dompet_" + d.r.from + "_sd_" + d.r.to + ".pdf", "application/pdf");
+    createFile(REQ_PDF, "Laporan_Dompet_Ivan_" + d.r.from + "_sd_" + d.r.to + ".pdf", "application/pdf");
   }
 
   void saveCsv(String content, String name) { pendingCsv = content; createFile(REQ_CSV, name, "text/csv"); }
 
-  void backup() { createFile(REQ_BACKUP, "Cadangan_Dompet_" + Fmt.today() + ".json", "application/json"); }
+  void backup() { createFile(REQ_BACKUP, "Cadangan_Dompet_Ivan_" + Fmt.today() + ".json", "application/json"); }
 
   void restorePrompt() {
-    ui.confirm("Pulihkan data?", "Semua transaksi, akun, kategori, anggaran, tagihan, target, utang, wishlist, dan pengaturan di HP ini akan DIGANTI isi berkas cadangan. Cadangkan data saat ini terlebih dahulu bila perlu. Cadangan v1–v2.5 juga diterima.", "Pilih berkas", ui.gold, new Runnable() {
+    ui.confirm("Pulihkan data?", "Semua transaksi, akun, kategori, anggaran, tagihan, target, utang, wishlist, dan pengaturan di HP ini akan DIGANTI isi berkas cadangan. Cadangkan data saat ini terlebih dahulu bila perlu. Cadangan Dompet v1–3.5 juga diterima. Mata uang ikut berganti sesuai isi cadangan.", "Pilih berkas", ui.gold, new Runnable() {
       public void run() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
           .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "text/plain", "application/octet-stream"});
@@ -662,8 +754,9 @@ public class MainActivity extends Activity {
         } finally { in.close(); }
         int count = Backup.restore(db, buf.toString("UTF-8"));
         ReminderReceiver.schedule(this);
-        render(true);
-        ui.info("Cadangan dipulihkan", count + " transaksi beserta data lain berhasil dipulihkan.");
+        // Dibuat ulang agar mata uang, skenario simulasi, dan isian layar yang tersimpan di memori ikut berganti.
+        Toast.makeText(this, count + " transaksi beserta data lain berhasil dipulihkan (" + Fmt.cur.code + ")", Toast.LENGTH_LONG).show();
+        recreate();
         return;
       }
       OutputStream out;

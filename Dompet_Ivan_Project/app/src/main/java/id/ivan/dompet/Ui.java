@@ -269,18 +269,22 @@ final class Ui {
     return e;
   }
 
-  /** Input rupiah dengan pemisah ribuan otomatis saat mengetik. */
+  /** Input nominal dengan pemisah ribuan otomatis; mata uang bersen menerima koma (atau titik di akhir) sebagai desimal. */
   EditText moneyInput(String hint, long initial) {
-    final EditText e = input(hint, InputType.TYPE_CLASS_NUMBER, 17);
-    if (initial > 0) e.setText(Fmt.group(initial));
+    final int dec = Fmt.cur.dec;
+    final EditText e = input(hint, InputType.TYPE_CLASS_NUMBER, 17 + dec + 1);
+    if (dec > 0) {
+      e.setKeyListener(android.text.method.DigitsKeyListener.getInstance("0123456789.,"));
+      e.setRawInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+    }
+    if (initial > 0) e.setText(Fmt.num(initial));
     e.addTextChangedListener(new TextWatcher() {
       boolean busy;
       public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
       public void onTextChanged(CharSequence s, int a, int b, int c) {}
       public void afterTextChanged(Editable s) {
         if (busy) return;
-        long v = Fmt.parseAmount(s.toString());
-        String f = v < 0 ? "" : Fmt.group(v);
+        String f = Fmt.typing(s.toString(), dec);
         if (!f.equals(s.toString())) { busy = true; e.setText(f); e.setSelection(f.length()); busy = false; }
       }
     });
