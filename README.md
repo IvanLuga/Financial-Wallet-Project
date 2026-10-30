@@ -3,9 +3,9 @@ Create a Digital Wallet for my personal needs. But i think it's okay to share it
 
 ## Dompet Ivan v4.0
 
-Aplikasi dompet pribadi Android (offline, tanpa akun/iklan/internet).
+A personal wallet app for Android ("Dompet" means "wallet" in Indonesian). It works fully offline: no account, no ads, no internet permission. The app's interface is in Indonesian.
 
-- APK siap pasang: [`releases/Dompet_Ivan_v4.0.apk`](releases/Dompet_Ivan_v4.0.apk) — pembaruan langsung dari Dompet 3.x (sertifikat sama, data tetap utuh).
-- Kode sumber, catatan rilis, cara build & pengujian: [`Dompet_Ivan_Project/README.md`](Dompet_Ivan_Project/README.md).
+- Ready-to-install APK: [`releases/Dompet_Ivan_v4.0.apk`](releases/Dompet_Ivan_v4.0.apk). It installs as an update over Dompet 3.x (same signing certificate, existing data is kept).
+- Source code, release notes, build steps, and testing: [`Dompet_Ivan_Project/README.md`](Dompet_Ivan_Project/README.md).
 
-Baru di 4.0: reset keuangan dengan pengaman (bisa dibatalkan 7 hari), ganti mata uang (18 mata uang, sen, konversi kurs manual), tempat sampah transaksi 30 hari, tagihan mingguan–tahunan, buka kunci sidik jari, dan perbaikan bug/keamanan.
+New in 4.0: a financial reset with safeguards (can be undone for 7 days), currency switching (18 currencies, cents, manual exchange-rate conversion), a 30-day transaction trash bin, weekly-to-yearly recurring bills, fingerprint unlock, and bug/security fixes.
