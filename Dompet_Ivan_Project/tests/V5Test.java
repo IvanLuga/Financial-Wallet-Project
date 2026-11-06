@@ -41,7 +41,8 @@ public class V5Test {
     notif();
     csv();
     crypto();
-    System.out.println("PASS " + passed + " pemeriksaan 5.0 (siklus gajian, aman dibelanjakan, jalur pribadi, notifikasi, impor CSV, enkripsi)");
+    review();
+    System.out.println("PASS " + passed + " pemeriksaan 5.0 (siklus gajian, aman dibelanjakan, jalur pribadi, notifikasi, impor CSV, enkripsi, inflasi pribadi, langganan, rapor)");
   }
 
   // ---------------- Siklus gajian ----------------
@@ -407,5 +408,92 @@ public class V5Test {
       Crypto.Box box2 = Crypto.encrypt(json, "rahasia123");
       ok(!box2.data.equals(box.data) && !box2.salt.equals(box.salt), "garam & IV acak tiap kali");
     } catch (Exception e) { throw new AssertionError("enkripsi: " + e); }
+  }
+
+  // ---------------- Inflasi pribadi, langganan, rapor ----------------
+
+  static void review() {
+    Fmt.setCurrency("IDR");
+    Fmt.setCycleDay(1);
+    String today = "2026-11-06";
+    ArrayList<Tx> txs = new ArrayList<>();
+    // Kopi susu: Rp18.000 setahun lalu → Rp23.000 sekarang, 3×/minggu.
+    for (String d = "2025-11-01"; d.compareTo(today) <= 0; d = Fmt.addDays(d, 2)) {
+      long price = d.compareTo("2026-05-01") < 0 ? 18_000 : 23_000;
+      if (d.equals("2026-03-03")) price = 36_000; // sesekali beli dua: tidak mengubah median
+      txs.add(tx(d, 0, price, "Makan & minum", "Kopi susu"));
+    }
+    // Bensin stabil Rp50.000 seminggu sekali.
+    for (String d = "2025-11-02"; d.compareTo(today) <= 0; d = Fmt.addDays(d, 7)) txs.add(tx(d, 0, 50_000, "Transportasi", "bensin"));
+    // Barang yang jarang dibeli / rentang pendek: tidak masuk.
+    txs.add(tx("2026-10-01", 0, 300_000, "Belanja", "Sepatu"));
+    txs.add(tx("2026-10-20", 0, 310_000, "Belanja", "Sepatu"));
+    for (int i = 0; i < 6; i++) txs.add(tx(Fmt.addDays("2026-09-01", i * 7), 0, 10_000 + i * 1_000, "Makan & minum", "Gorengan"));
+    // Netflix rutin (langganan terdeteksi), kos rutin (bukan langganan).
+    for (String p = "2026-01"; p.compareTo("2026-11") < 0; p = Fmt.addMonths(p, 1)) {
+      txs.add(tx(p + "-05", 0, 54_000, "Hiburan", "Netflix"));
+      txs.add(tx(p + "-03", 0, 1_200_000, "Tagihan", "Bayar kos"));
+    }
+    Review.Inflation inf = Review.inflation(txs, today);
+    Review.PriceItem kopi = null, bensin = null;
+    for (Review.PriceItem p : inf.items) { if (p.name.equalsIgnoreCase("Kopi susu")) kopi = p; if (p.name.equalsIgnoreCase("bensin")) bensin = p; }
+    ok(kopi != null, "kopi susu terdeteksi");
+    eq(18_000L, kopi.oldPrice, "harga lama kopi (median, tahan beli dua)");
+    eq(23_000L, kopi.newPrice, "harga baru kopi");
+    ok(Math.abs(kopi.change - (23.0 / 18 - 1)) < 1e-9, "kenaikan kopi 27,8%");
+    ok(kopi.annual > 0.3 && kopi.annual < 0.7, "kenaikan tahunan kopi wajar: " + kopi.annual);
+    ok(bensin != null && bensin.change == 0, "bensin stabil");
+    for (Review.PriceItem p : inf.items) ok(!p.name.equals("Sepatu") && !p.name.equals("Gorengan"), "barang jarang/rentang pendek tidak dihitung: " + p.name);
+    ok(!Double.isNaN(inf.index) && inf.index > 0 && inf.index < kopi.annual, "indeks berbobot di antara 0 dan kopi: " + inf.index);
+    ok(inf.yearlyExtra > 0, "tambahan biaya per tahun");
+    eq("Kopi susu", inf.items.get(0).name, "urut dari kenaikan terbesar");
+    ok(Double.isNaN(Review.inflation(new ArrayList<Tx>(), today).index), "tanpa data → NaN");
+
+    // Langganan.
+    ArrayList<Bill> bills = new ArrayList<>();
+    Bill sp = new Bill(); sp.id = 1; sp.name = "Spotify"; sp.kind = "Langganan"; sp.amount = 55_000; sp.due = "2026-11-20"; sp.anchor = 20; sp.freq = Bill.FREQ_MONTH;
+    Bill ic = new Bill(); ic.id = 2; ic.name = "iCloud 200GB"; ic.kind = "Tagihan"; ic.amount = 459_000; ic.due = "2027-01-10"; ic.anchor = 10; ic.freq = Bill.FREQ_YEAR;
+    Bill pln = new Bill(); pln.id = 3; pln.name = "Listrik"; pln.kind = "Tagihan"; pln.amount = 300_000; pln.due = "2026-11-15"; pln.anchor = 15; pln.freq = Bill.FREQ_MONTH;
+    bills.add(sp); bills.add(ic); bills.add(pln);
+    ArrayList<Review.Sub> subs = Review.subscriptions(txs, bills, today);
+    ArrayList<String> names = new ArrayList<>();
+    for (Review.Sub x : subs) names.add(x.name);
+    ok(names.contains("Spotify") && names.contains("iCloud 200GB") && names.contains("Netflix"), "langganan: tagihan + terdeteksi: " + names);
+    ok(!names.contains("Listrik") && !names.contains("Bayar kos"), "listrik & kos bukan langganan");
+    for (Review.Sub x : subs) {
+      if (x.name.equals("iCloud 200GB")) { eq(459_000L, x.annual, "iCloud tahunan"); eq(38_250L, x.monthly, "iCloud per bulan"); }
+      if (x.name.equals("Netflix")) { eq(648_000L, x.annual, "Netflix setahun"); eq("2026-10-05", x.lastDate, "Netflix terakhir"); }
+      ok(x.key.matches("sub_[0-9a-f]{8}") && x.key.length() <= 40, "kunci pengaturan valid: " + x.key);
+    }
+    for (int i = 1; i < subs.size(); i++) ok(subs.get(i - 1).annual >= subs.get(i).annual, "urut biaya tahunan");
+    eq(Review.subKey("Netflix"), Review.subKey("  netflix "), "kunci stabil");
+
+    // Rapor bulanan & mingguan.
+    ArrayList<Tx> cur = new ArrayList<>(), prev = new ArrayList<>();
+    cur.add(tx("2026-10-01", 1, 6_000_000, "Gaji", ""));
+    for (int d = 1; d <= 31; d++) if (d % 3 != 0) cur.add(tx(Fmt.iso(2026, 10, d), 0, 40_000, "Makan & minum", "Kopi"));
+    cur.add(tx("2026-10-10", 0, 900_000, "Belanja", "Headset"));
+    prev.add(tx("2026-09-10", 0, 2_500_000, "Belanja", "Ponsel"));
+    Review.Wrap w = Review.wrap(cur, prev, "2026-10-01", "2026-10-31", today);
+    eq(31, w.days, "rapor: 31 hari");
+    eq(6_000_000L, w.income, "rapor: pemasukan");
+    eq(21 * 40_000L + 900_000L, w.expense, "rapor: pengeluaran");
+    eq("Penabung andal", w.badge, "rapor: lencana tabungan ≥30%");
+    eq("Kopi", w.frequentNote, "rapor: catatan tersering");
+    eq(21, w.frequentCount, "rapor: 21× kopi");
+    eq("Headset", w.biggestName, "rapor: belanja terbesar");
+    eq(10, w.noSpendDays, "rapor: hari tanpa belanja");
+    ok(!Double.isNaN(w.change) && w.change < 0, "rapor: turun dari bulan lalu");
+    ok(!w.facts.isEmpty(), "rapor: fakta");
+    eq("Oktober 2026", w.label, "rapor: label");
+    Review.Wrap empty = Review.wrap(new ArrayList<Tx>(), new ArrayList<Tx>(), "2026-11-02", "2026-11-08", today);
+    eq("Belum ada catatan", empty.badge, "rapor kosong");
+    eq(5, empty.days, "rapor minggu berjalan: sampai hari ini");
+    java.util.LinkedHashMap<String, Long> topc = Review.topCategories(cur, 1);
+    eq(2, topc.size(), "kategori teratas: 1 + Lainnya");
+    long sumTop = 0;
+    for (long v : topc.values()) sumTop += v;
+    eq(w.expense, sumTop, "kategori teratas: jumlah tetap");
+    eq("Belanja", topc.keySet().iterator().next(), "kategori teratas: Belanja 900rb > Makan 840rb");
   }
 }

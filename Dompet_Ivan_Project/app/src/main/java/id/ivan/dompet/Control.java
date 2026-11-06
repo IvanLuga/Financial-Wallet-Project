@@ -240,7 +240,7 @@ final class Control {
       LinkedHashMap<String, Long> cats = Analytics.byCategory(db.range(mon, today), Model.EXPENSE);
       String top = cats.isEmpty() ? "" : " Terbesar: " + cats.keySet().iterator().next() + " (" + Notifier.money(c, cats.values().iterator().next()) + ").";
       String cmp = last > 0 ? (week > last ? " Naik " : " Turun ") + Fmt.pct(Math.abs((double) (week - last) / last)) + " dari minggu lalu." : "";
-      Notifier.post(c, Notifier.id("weekly"), Notifier.CH_SUMMARY, "Ringkasan minggu ini", "Pengeluaran " + Notifier.money(c, week) + "." + cmp + top, 1, 0xFF3D6FEC);
+      Notifier.post(c, Notifier.id("weekly"), Notifier.CH_SUMMARY, "Rapor minggu ini siap", "Pengeluaran " + Notifier.money(c, week) + "." + cmp + top + " Ketuk untuk melihat rapor.", 1, 0xFF3D6FEC, "wrap_week");
     }
   }
 
@@ -263,6 +263,26 @@ final class Control {
         "Terpakai " + Notifier.money(c, f.actual) + " dari " + Notifier.money(c, f.limit) + ". Dengan laju sekarang, akhir bulan ≈ " + Notifier.money(c, f.predicted) + ".", MainActivity.TAB_PROJECT, 0xFFD98A12);
       break;
     }
+  }
+
+  /**
+   * Audit langganan (5.0): sebulan sekali (hari ke-3 siklus), bila ada langganan yang belum dikonfirmasi
+   * "masih dipakai" dalam 90 hari, kirim satu pengingat berisi total biaya tahunan.
+   */
+  static void subscriptionAudit(Context c, Db db, String today) {
+    if (Fmt.cycleIndex(today) != 3 || !db.flag("n_subs", true)) return;
+    long annual = 0;
+    int check = 0;
+    for (Review.Sub x : Review.subscriptions(db.range(Fmt.addDays(today, -400), today), db.bills(), today)) {
+      String st = db.setting(x.key + "x", "");
+      if (!st.isEmpty() && (x.lastDate.isEmpty() || x.lastDate.compareTo(st) <= 0)) continue;
+      annual += x.annual;
+      String ok = db.setting(x.key + "o", "");
+      if (ok.isEmpty() || Fmt.daysBetween(ok, today) >= 90) check++;
+    }
+    if (check == 0 || !once(c, "subs|" + Fmt.cycle(today))) return;
+    Notifier.post(c, Notifier.id("subs"), Notifier.CH_SUMMARY, "Audit langganan: " + check + " perlu dicek",
+      "Total langganan " + Notifier.money(c, annual) + "/tahun. Masih dipakai semua? Ketuk untuk memeriksa.", 1, 0xFF8257E5, "subs");
   }
 
   /** Pengecekan pagi: tagihan & utang jatuh tempo, wishlist selesai masa tenang, cadangan, laporan bulanan. */
@@ -297,14 +317,15 @@ final class Control {
           "Data Dompet hanya tersimpan di HP ini. " + (last.isEmpty() ? "Belum pernah dicadangkan." : "Cadangan terakhir " + Fmt.dayLabel(last) + ".") + " Buka menu ⋮ → Cadangkan.", 0, 0xFF0C8A82);
     }
     if (s.nForecast && db.txCount() > 0) forecastAlerts(c, db, today);
+    if (db.txCount() > 0) subscriptionAudit(c, db, today);
     if (s.nMonthly && Fmt.cycleIndex(today) == 1) {
       String prev = Fmt.addMonths(Fmt.cycle(today), -1);
       if (once(c, "mr|" + prev)) {
         ArrayList<Tx> l = db.month(prev);
         long in = Analytics.sum(l, Model.INCOME), out = Analytics.sum(l, Model.EXPENSE);
         if (!l.isEmpty())
-          Notifier.post(c, Notifier.id("monthly"), Notifier.CH_SUMMARY, "Laporan " + Fmt.cycleName(prev) + " siap",
-            "Masuk " + Notifier.money(c, in) + " · Keluar " + Notifier.money(c, out) + " · Bersih " + (Notifier.hidden(c) ? Fmt.masked() : Fmt.signed(in - out)) + ". Ketuk untuk wawasan & PDF.", 1, 0xFF3D6FEC);
+          Notifier.post(c, Notifier.id("monthly"), Notifier.CH_SUMMARY, "Rapor " + Fmt.monthName(prev) + " siap",
+            "Masuk " + Notifier.money(c, in) + " · Keluar " + Notifier.money(c, out) + " · Bersih " + (Notifier.hidden(c) ? Fmt.masked() : Fmt.signed(in - out)) + ". Ketuk untuk melihat rapor.", 1, 0xFF3D6FEC, "wrap_month");
       }
     }
   }

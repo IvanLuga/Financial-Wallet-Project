@@ -37,7 +37,7 @@ import java.util.Calendar;
 public class MainActivity extends Activity {
   static final String APP_NAME = "Dompet Ivan v4.0", VERSION = "4.0";
   static final int VERSION_CODE = 6;
-  static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_NOTIF = 45;
+  static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_PNG = 7, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
   static final int[] NAV_ORDER = {TAB_HOME, TAB_INSIGHT, TAB_PROJECT, TAB_CONTROL, TAB_PLAN};
@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
   Projection projection;
   Forms forms;
   DataTools tools;
+  Wrapped wrapped;
 
   private FrameLayout root;
   private LinearLayout shell;
@@ -74,6 +75,7 @@ public class MainActivity extends Activity {
   /** Data menunggu untuk ditulis setelah pengguna memilih lokasi berkas. */
   PdfReport.Data pendingPdf;
   String pendingCsv;
+  android.graphics.Bitmap pendingPng;
   private boolean pickingFile, locked;
   private long stoppedAt;
   private android.os.CancellationSignal fpSignal;
@@ -116,6 +118,7 @@ public class MainActivity extends Activity {
     projection = new Projection(this);
     forms = new Forms(this);
     tools = new DataTools(this);
+    wrapped = new Wrapped(this);
 
     Notifier.channels(this);
     ReminderReceiver.schedule(this);
@@ -178,6 +181,9 @@ public class MainActivity extends Activity {
         if ("inbox".equals(open)) tools.inbox();
         else if ("add".equals(open)) forms.tx(null);
         else if ("templates".equals(open)) forms.templates();
+        else if ("wrap_week".equals(open)) wrapped.showWeek();
+        else if ("wrap_month".equals(open)) wrapped.showLastMonth();
+        else if ("subs".equals(open)) wrapped.subsSheet();
       }
     }, 400);
   }
@@ -760,6 +766,8 @@ public class MainActivity extends Activity {
 
   void saveCsv(String content, String name) { pendingCsv = content; createFile(REQ_CSV, name, "text/csv"); }
 
+  void savePng(android.graphics.Bitmap bmp, String name) { pendingPng = bmp; createFile(REQ_PNG, name, "image/png"); }
+
   void backup() { createFile(REQ_BACKUP, "Cadangan_Dompet_Ivan_" + Fmt.today() + ".json", "application/json"); }
 
   void pickImport() {
@@ -824,7 +832,7 @@ public class MainActivity extends Activity {
   @Override protected void onActivityResult(int req, int result, Intent data) {
     super.onActivityResult(req, result, data);
     pickingFile = false;
-    if (result != RESULT_OK || data == null || data.getData() == null) { pendingPdf = null; pendingCsv = null; return; }
+    if (result != RESULT_OK || data == null || data.getData() == null) { pendingPdf = null; pendingCsv = null; pendingPng = null; return; }
     final Uri uri = data.getData();
     try {
       if (req == REQ_RESTORE) {
@@ -851,6 +859,7 @@ public class MainActivity extends Activity {
       try {
         if (req == REQ_PDF && pendingPdf != null) { PdfReport.write(db, pendingPdf, out); mime = "application/pdf"; }
         else if (req == REQ_CSV && pendingCsv != null) { out.write(pendingCsv.getBytes(StandardCharsets.UTF_8)); mime = "text/csv"; }
+        else if (req == REQ_PNG && pendingPng != null) { pendingPng.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); mime = "image/png"; }
         else if (req == REQ_BACKUP) {
           out.write(Backup.export(db).toString(1).getBytes(StandardCharsets.UTF_8));
           mime = "application/json";
@@ -859,6 +868,7 @@ public class MainActivity extends Activity {
       } finally { out.close(); }
       pendingPdf = null;
       pendingCsv = null;
+      pendingPng = null;
       forms.fileSaved(uri, mime, req == REQ_BACKUP);
     } catch (Exception e) {
       ui.info("Gagal memproses berkas", e.getMessage() == null ? e.toString() : e.getMessage());

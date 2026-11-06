@@ -43,6 +43,7 @@ final class Home {
 
     hero(body, total, reserved, inc, exp);
     inboxCard(body);
+    if (period.equals(Fmt.cycle(today))) wrapCard(body, today);
     if (period.equals(Fmt.cycle(today))) a.projection.safeCard(body);
     accounts(body);
     controlStatus(body, period, today);
@@ -102,6 +103,24 @@ final class Home {
     long bal = total;
     for (int i = n - 1; i >= 0; i--) { out[i] = bal; bal -= net[i]; }
     return out;
+  }
+
+  /** Kartu "rapor bulan lalu siap" (5.0) selama 3 hari pertama siklus, sampai dibuka. */
+  private void wrapCard(LinearLayout body, String today) {
+    final String prev = Fmt.addMonths(Fmt.cycle(today), -1);
+    if (Fmt.cycleIndex(today) > 3 || a.prefs.getBoolean("wrap_seen_" + prev, false) || db.month(prev).isEmpty()) return;
+    LinearLayout c = ui.card(body);
+    c.setBackground(ui.gradient(ui.heroA, ui.heroB, 22));
+    LinearLayout r = ui.row();
+    r.addView(ui.text("🎁", 28, Color.WHITE));
+    ui.hgap(r, 12);
+    LinearLayout t = ui.col();
+    t.addView(ui.label("Rapor " + Fmt.monthName(prev) + " siap", 14.5f, Color.WHITE));
+    t.addView(ui.text("Lencana, kategori terbesar, dan fakta menarik bulan lalu", 12, 0xFFC9ECE4));
+    r.addView(t, Ui.weight(1));
+    r.addView(ui.text("›", 22, 0xFFC9ECE4));
+    c.addView(r);
+    ui.click(c, new Runnable() { public void run() { a.prefs.edit().putBoolean("wrap_seen_" + prev, true).apply(); a.wrapped.showLastMonth(); a.render(false); } });
   }
 
   /** Kartu kotak saran (5.0): saran transaksi dari notifikasi yang menunggu konfirmasi. */

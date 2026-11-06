@@ -454,6 +454,7 @@ final class ControlScreen {
     toggle(c, "n_day", s.nDay, "Batas harian", "Saat belanja hari ini melewati jatah harian");
     toggle(c, "n_week", s.nWeek, "Batas mingguan", "Saat 80/100% batas mingguan terpakai");
     toggle(c, "n_unusual", s.nUnusual, "Transaksi besar tidak biasa", "≥ 3× median pengeluaran atau ≥ " + a.money(s.unusualMin));
+    toggle(c, "n_subs", db.flag("n_subs", true), "Audit langganan", "Sebulan sekali bila ada langganan yang belum dicek 90 hari (pukul 09.00)");
     toggle(c, "n_forecast", s.nForecast, "Peringatan prediktif", "Saldo diprediksi minus ≤10 hari lagi atau amplop diprediksi habis ≤7 hari (pukul 09.00)");
     ui.divider(c);
     toggle(c, "n_evening", s.nEvening, "Ringkasan malam", "Pengeluaran hari ini vs jatah, setiap malam");

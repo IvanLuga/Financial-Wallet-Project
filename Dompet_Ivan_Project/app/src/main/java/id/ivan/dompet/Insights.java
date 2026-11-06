@@ -85,8 +85,11 @@ final class Insights {
     body.addView(label);
 
     kpis(body, r);
+    a.wrapped.entryCard(body);
     health(body, r);
     insightList(body, r);
+    a.wrapped.inflationCard(body);
+    a.wrapped.subsCard(body);
     trend(body, d);
     composition(body, r);
     daily(body, r, d);
