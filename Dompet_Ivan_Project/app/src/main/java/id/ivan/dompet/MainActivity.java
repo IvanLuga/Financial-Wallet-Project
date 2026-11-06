@@ -35,9 +35,9 @@ import java.util.Calendar;
 
 /** Kerangka aplikasi: header, navigasi bawah, tema, kunci PIN, menu pengaturan, dan ekspor/impor berkas. */
 public class MainActivity extends Activity {
-  static final String APP_NAME = "Dompet Ivan v4.0", VERSION = "4.0";
-  static final int VERSION_CODE = 6;
-  static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_NOTIF = 45;
+  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0";
+  static final int VERSION_CODE = 7;
+  static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_PNG = 7, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
   static final int[] NAV_ORDER = {TAB_HOME, TAB_INSIGHT, TAB_PROJECT, TAB_CONTROL, TAB_PLAN};
@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
   Projection projection;
   Forms forms;
   DataTools tools;
+  Wrapped wrapped;
 
   private FrameLayout root;
   private LinearLayout shell;
@@ -74,9 +75,12 @@ public class MainActivity extends Activity {
   /** Data menunggu untuk ditulis setelah pengguna memilih lokasi berkas. */
   PdfReport.Data pendingPdf;
   String pendingCsv;
+  android.graphics.Bitmap pendingPng;
   private boolean pickingFile, locked;
   private long stoppedAt;
   private android.os.CancellationSignal fpSignal;
+  /** Layar yang dibuka setelah aplikasi siap (dari notifikasi/widget), mis. "inbox". */
+  private String pendingOpen;
   private Runnable lockUnlocked;
   private TextView lockMsg;
 
@@ -94,7 +98,7 @@ public class MainActivity extends Activity {
     ui = new Ui(this, dark, prefs.getBoolean("animate", true));
     db = new Db(this);
     db.getReadableDatabase(); // membuka database = memuat mata uang aktif sebelum layar digambar
-    period = Fmt.period(Fmt.today());
+    period = Fmt.cycle(Fmt.today());
     if (state != null) {
       tab = state.getInt("tab", 0);
       period = state.getString("period", period);
@@ -114,6 +118,7 @@ public class MainActivity extends Activity {
     projection = new Projection(this);
     forms = new Forms(this);
     tools = new DataTools(this);
+    wrapped = new Wrapped(this);
 
     Notifier.channels(this);
     ReminderReceiver.schedule(this);
@@ -129,12 +134,18 @@ public class MainActivity extends Activity {
       requestPermissions(new String[]{Notifier.PERMISSION}, REQ_NOTIF);
     }
     db.purgeOldTrash();
+    db.purgeInbox();
     tools.undoUntil(); // menghapus salinan reset yang sudah kedaluwarsa
+    runPendingOpen();
+    if (AutoBackup.due(this)) {
+      final android.content.Context app = getApplicationContext();
+      new Thread(new Runnable() { public void run() { AutoBackup.runIfDue(app, db); } }).start();
+    }
     if (prefs.getBoolean("welcome_fresh", false)) {
-      prefs.edit().putBoolean("welcome_fresh", false).putBoolean("seen_v40", true).apply();
+      prefs.edit().putBoolean("welcome_fresh", false).putBoolean("seen_v50", true).putBoolean("seen_v40", true).apply();
       handler.postDelayed(new Runnable() { public void run() { forms.welcome(true); } }, 450);
-    } else if (!prefs.getBoolean("seen_v40", false)) {
-      prefs.edit().putBoolean("seen_v40", true).putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
+    } else if (!prefs.getBoolean("seen_v50", false)) {
+      prefs.edit().putBoolean("seen_v50", true).putBoolean("seen_v40", true).putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
       handler.postDelayed(new Runnable() { public void run() { forms.welcome(db.txCount() == 0); } }, 450);
     }
   }
@@ -158,19 +169,42 @@ public class MainActivity extends Activity {
   @Override protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
     if (readIntent(intent) && !locked) render(true);
+    if (!locked) runPendingOpen();
+  }
+
+  private void runPendingOpen() {
+    final String open = pendingOpen;
+    pendingOpen = null;
+    if (open == null) return;
+    handler.postDelayed(new Runnable() {
+      public void run() {
+        if ("inbox".equals(open)) tools.inbox();
+        else if ("add".equals(open)) forms.tx(null);
+        else if ("templates".equals(open)) forms.templates();
+        else if ("wrap_week".equals(open)) wrapped.showWeek();
+        else if ("wrap_month".equals(open)) wrapped.showLastMonth();
+        else if ("subs".equals(open)) wrapped.subsSheet();
+      }
+    }, 400);
   }
 
   private boolean readIntent(Intent i) {
-    if (i == null || !i.hasExtra("tab")) return false;
+    if (i == null) return false;
+    String open = i.getStringExtra("open");
+    if (open != null && !open.isEmpty()) pendingOpen = open;
+    i.removeExtra("open");
+    if (!i.hasExtra("tab")) return false;
     tab = Math.max(0, Math.min(4, i.getIntExtra("tab", 0)));
     i.removeExtra("tab");
-    if (tab == TAB_CONTROL || tab == TAB_INSIGHT) period = Fmt.period(Fmt.today());
+    if (tab == TAB_CONTROL || tab == TAB_INSIGHT) period = Fmt.cycle(Fmt.today());
     return true;
   }
 
   @Override protected void onStop() {
     super.onStop();
     stoppedAt = System.currentTimeMillis();
+    final android.content.Context app = getApplicationContext();
+    new Thread(new Runnable() { public void run() { SaldoWidget.refresh(app); } }).start();
   }
 
   @Override protected void onRestart() {
@@ -369,7 +403,7 @@ public class MainActivity extends Activity {
     }
     boolean showMonth = tab == TAB_HOME || tab == TAB_CONTROL || (tab == TAB_INSIGHT && insights.range == 0);
     monthBar.setVisibility(showMonth && home.results == null ? View.VISIBLE : View.GONE);
-    monthLabel.setText(Fmt.monthName(period) + (period.equals(Fmt.period(today)) ? "" : "  ·  ketuk untuk pilih"));
+    monthLabel.setText(Fmt.cycleName(period) + (period.equals(Fmt.cycle(today)) || Fmt.cycleDay > 1 ? "" : "  ·  ketuk untuk pilih"));
     searchButton.setVisibility(tab == TAB_HOME ? View.VISIBLE : View.GONE);
     privacyButton.setImageDrawable(tinted(hide ? R.drawable.ic_eye_off : R.drawable.ic_eye));
   }
@@ -428,7 +462,7 @@ public class MainActivity extends Activity {
     s.body.addView(yearRow);
     ui.gap(s.body, 8);
     s.body.addView(months);
-    s.secondary("Bulan ini", ui.primary, new Runnable() { public void run() { s.dismiss(); period = Fmt.period(Fmt.today()); render(true); } });
+    s.secondary("Bulan ini", ui.primary, new Runnable() { public void run() { s.dismiss(); period = Fmt.cycle(Fmt.today()); render(true); } });
     s.show();
   }
 
@@ -436,6 +470,7 @@ public class MainActivity extends Activity {
     hide = !hide;
     prefs.edit().putBoolean("hide", hide).apply();
     if (hide) ((android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
+    SaldoWidget.refresh(this);
     toast(hide ? "Nominal disembunyikan" : "Nominal ditampilkan");
     render(false);
   }
@@ -487,7 +522,12 @@ public class MainActivity extends Activity {
     s.item("🏷️", "Kelola kategori", "Tambah, ubah nama/ikon, hapus", ui.purple, new Runnable() { public void run() { forms.categories(0); } });
     s.item("⚡", "Template transaksi cepat", db.templates().size() + " template", ui.gold, new Runnable() { public void run() { forms.templates(); } });
     s.item(Fmt.cur.flag, "Mata uang", DataTools.label(Fmt.cur), ui.green, new Runnable() { public void run() { tools.currencyMenu(); } });
+    s.item("📆", "Awal bulan keuangan", DataTools.cycleLabel(), ui.blue, new Runnable() { public void run() { tools.cycleMenu(); } });
     long trash = db.trashCount();
+    long inbox = db.inboxCount();
+    s.item("📥", "Saran dari notifikasi", NotifReader.enabled(this) ? (NotifReader.permitted(this) ? "Aktif" : "Aktif · izin akses notifikasi belum diberikan") + (inbox > 0 ? " · " + inbox + " saran menunggu" : "") : "Baca notifikasi bank/e-wallet jadi saran transaksi", ui.blue, new Runnable() { public void run() { if (db.inboxCount() > 0) tools.inbox(); else tools.notifSettings(); } });
+    s.item("📄", "Impor mutasi (CSV)", "Dari rekening bank, e-wallet, atau CSV Dompet", ui.purple, new Runnable() { public void run() { pickImport(); } });
+    s.item("🧩", "Widget layar utama", "Saldo, aman hari ini, dan catat 1 ketukan", ui.gold, new Runnable() { public void run() { tools.widgetSettings(); } });
     s.item("🗑️", "Tempat sampah", trash == 0 ? "Kosong · transaksi terhapus disimpan " + Db.TRASH_DAYS + " hari" : trash + " transaksi · bisa dipulihkan", ui.muted, new Runnable() { public void run() { tools.trash(); } });
     s.item("🎨", "Tema tampilan", new String[]{"Ikuti sistem", "Terang", "Gelap"}[prefs.getInt("theme", 0)], ui.primary, new Runnable() { public void run() { themeMenu(); } });
     s.item("✨", ui.animate ? "Matikan animasi" : "Aktifkan animasi", "Animasi transisi, grafik, dan angka", ui.blue, new Runnable() {
@@ -496,9 +536,10 @@ public class MainActivity extends Activity {
     s.item(hide ? "🙈" : "👁️", hide ? "Tampilkan nominal" : "Sembunyikan nominal", "Privasi tampilan & notifikasi", ui.muted, new Runnable() { public void run() { togglePrivacy(); } });
     s.item("🔒", hasPin() ? "Ubah / hapus PIN" : "Kunci dengan PIN", hasPin() ? (fingerprintOn() ? "PIN + sidik jari aktif" : "PIN aktif · sidik jari bisa diaktifkan") : "Kunci saat aplikasi dibuka", ui.red, new Runnable() { public void run() { pinMenu(); } });
     s.item("💾", "Cadangkan data (JSON)", lastBackupLabel(), ui.green, new Runnable() { public void run() { backup(); } });
+    s.item("🗂️", "Cadangan otomatis", AutoBackup.every(this) <= 0 ? "Mati" : (AutoBackup.every(this) == 1 ? "Harian" : AutoBackup.every(this) == 7 ? "Mingguan" : "Bulanan") + (AutoBackup.prefs(this).getString("pw", "").isEmpty() ? "" : " · terkunci kata sandi"), ui.green, new Runnable() { public void run() { tools.autoBackupSettings(); } });
     s.item("♻️", "Pulihkan dari cadangan", "Mengganti semua data di HP ini", ui.gold, new Runnable() { public void run() { restorePrompt(); } });
     s.item("📐", "Asumsi proyeksi", "Kenaikan pemasukan " + Projection.pct1(Projection.assumption(db, "asm_inc", 30)) + " · inflasi " + Projection.pct1(Projection.assumption(db, "asm_infl", 30)) + " · imbal hasil " + Projection.pct1(Projection.assumption(db, "asm_ret", 0)), ui.purple, new Runnable() { public void run() { projection.assumptions(); } });
-    s.item("🔔", "Pengaturan notifikasi", "Batas, jam pengecekan, jenis pengingat", ui.primary, new Runnable() { public void run() { tab = TAB_CONTROL; period = Fmt.period(Fmt.today()); render(true); handler.postDelayed(new Runnable() { public void run() { control.scrollToSettings(); } }, 400); } });
+    s.item("🔔", "Pengaturan notifikasi", "Batas, jam pengecekan, jenis pengingat", ui.primary, new Runnable() { public void run() { tab = TAB_CONTROL; period = Fmt.cycle(Fmt.today()); render(true); handler.postDelayed(new Runnable() { public void run() { control.scrollToSettings(); } }, 400); } });
     s.item("ℹ️", "Tentang " + APP_NAME, "Versi, privasi, batasan", ui.muted, new Runnable() { public void run() { forms.about(); } });
     TextView danger = ui.caps("Zona berbahaya", ui.red);
     ui.pad(danger, 6, 16, 0, 4);
@@ -725,7 +766,58 @@ public class MainActivity extends Activity {
 
   void saveCsv(String content, String name) { pendingCsv = content; createFile(REQ_CSV, name, "text/csv"); }
 
+  void savePng(android.graphics.Bitmap bmp, String name) { pendingPng = bmp; createFile(REQ_PNG, name, "image/png"); }
+
   void backup() { createFile(REQ_BACKUP, "Cadangan_Dompet_Ivan_" + Fmt.today() + ".json", "application/json"); }
+
+  void pickImport() {
+    Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+      .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/csv", "text/comma-separated-values", "text/plain", "application/vnd.ms-excel", "application/octet-stream"});
+    try { pickingFile = true; startActivityForResult(i, REQ_IMPORT); } catch (ActivityNotFoundException e) { pickingFile = false; toast("Pengelola berkas tidak tersedia"); }
+  }
+
+  void pickBackupFolder() {
+    Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+    try { pickingFile = true; startActivityForResult(i, REQ_TREE); } catch (ActivityNotFoundException e) { pickingFile = false; toast("Pemilih folder tidak tersedia di HP ini"); }
+  }
+
+  private String readText(Uri uri, int max) throws IOException {
+    ByteArrayOutputStream buf = new ByteArrayOutputStream();
+    InputStream in = getContentResolver().openInputStream(uri);
+    if (in == null) throw new IOException("Berkas tidak terbaca");
+    try {
+      byte[] b = new byte[8192];
+      int n;
+      while ((n = in.read(b)) != -1) { buf.write(b, 0, n); if (buf.size() > max) throw new IOException("Berkas terlalu besar"); }
+    } finally { in.close(); }
+    return buf.toString("UTF-8");
+  }
+
+  private void restoreText(String text) throws Exception {
+    int count = Backup.restore(db, text);
+    ReminderReceiver.schedule(this);
+    // Dibuat ulang agar mata uang, skenario simulasi, dan isian layar yang tersimpan di memori ikut berganti.
+    Toast.makeText(this, count + " transaksi beserta data lain berhasil dipulihkan (" + Fmt.cur.code + ")", Toast.LENGTH_LONG).show();
+    recreate();
+  }
+
+  /** Cadangan terenkripsi (5.0): minta kata sandi, lalu pulihkan. */
+  private void restoreEncrypted(final String text) {
+    final Ui.Sheet s = ui.sheet("Cadangan terkunci", "Masukkan kata sandi yang dipakai saat cadangan dibuat.");
+    final android.widget.EditText pw = ui.input("Kata sandi", android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD, 64);
+    s.body.addView(pw);
+    s.secondary("Batal", ui.muted, new Runnable() { public void run() { s.dismiss(); } });
+    s.primary("Buka & pulihkan", ui.gold, new Runnable() {
+      public void run() {
+        String plain;
+        try { plain = AutoBackup.unwrap(text, pw.getText().toString()); }
+        catch (Exception e) { pw.setText(""); pw.setError("Kata sandi salah atau berkas rusak"); return; }
+        s.dismiss();
+        try { restoreText(plain); } catch (Exception e) { ui.info("Gagal memulihkan", e.getMessage() == null ? e.toString() : e.getMessage()); }
+      }
+    });
+    s.show();
+  }
 
   void restorePrompt() {
     ui.confirm("Pulihkan data?", "Semua transaksi, akun, kategori, anggaran, tagihan, target, utang, wishlist, dan pengaturan di HP ini akan DIGANTI isi berkas cadangan. Cadangkan data saat ini terlebih dahulu bila perlu. Cadangan Dompet v1–3.5 juga diterima. Mata uang ikut berganti sesuai isi cadangan.", "Pilih berkas", ui.gold, new Runnable() {
@@ -740,23 +832,23 @@ public class MainActivity extends Activity {
   @Override protected void onActivityResult(int req, int result, Intent data) {
     super.onActivityResult(req, result, data);
     pickingFile = false;
-    if (result != RESULT_OK || data == null || data.getData() == null) { pendingPdf = null; pendingCsv = null; return; }
+    if (result != RESULT_OK || data == null || data.getData() == null) { pendingPdf = null; pendingCsv = null; pendingPng = null; return; }
     final Uri uri = data.getData();
     try {
       if (req == REQ_RESTORE) {
-        ByteArrayOutputStream buf = new ByteArrayOutputStream();
-        InputStream in = getContentResolver().openInputStream(uri);
-        if (in == null) throw new IOException("Berkas tidak terbaca");
-        try {
-          byte[] b = new byte[8192];
-          int n;
-          while ((n = in.read(b)) != -1) { buf.write(b, 0, n); if (buf.size() > 40_000_000) throw new IOException("Berkas terlalu besar"); }
-        } finally { in.close(); }
-        int count = Backup.restore(db, buf.toString("UTF-8"));
-        ReminderReceiver.schedule(this);
-        // Dibuat ulang agar mata uang, skenario simulasi, dan isian layar yang tersimpan di memori ikut berganti.
-        Toast.makeText(this, count + " transaksi beserta data lain berhasil dipulihkan (" + Fmt.cur.code + ")", Toast.LENGTH_LONG).show();
-        recreate();
+        String text = readText(uri, 40_000_000);
+        if (AutoBackup.isEncrypted(text)) restoreEncrypted(text); else restoreText(text);
+        return;
+      }
+      if (req == REQ_IMPORT) {
+        tools.importPreview(readText(uri, 15_000_000));
+        return;
+      }
+      if (req == REQ_TREE) {
+        getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        AutoBackup.prefs(this).edit().putString("tree", uri.toString()).apply();
+        toast("Folder cadangan dipilih");
+        tools.autoBackupSettings();
         return;
       }
       OutputStream out;
@@ -767,6 +859,7 @@ public class MainActivity extends Activity {
       try {
         if (req == REQ_PDF && pendingPdf != null) { PdfReport.write(db, pendingPdf, out); mime = "application/pdf"; }
         else if (req == REQ_CSV && pendingCsv != null) { out.write(pendingCsv.getBytes(StandardCharsets.UTF_8)); mime = "text/csv"; }
+        else if (req == REQ_PNG && pendingPng != null) { pendingPng.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out); mime = "image/png"; }
         else if (req == REQ_BACKUP) {
           out.write(Backup.export(db).toString(1).getBytes(StandardCharsets.UTF_8));
           mime = "application/json";
@@ -775,6 +868,7 @@ public class MainActivity extends Activity {
       } finally { out.close(); }
       pendingPdf = null;
       pendingCsv = null;
+      pendingPng = null;
       forms.fileSaved(uri, mime, req == REQ_BACKUP);
     } catch (Exception e) {
       ui.info("Gagal memproses berkas", e.getMessage() == null ? e.toString() : e.getMessage());

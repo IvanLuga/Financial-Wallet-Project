@@ -46,7 +46,7 @@ final class Notifier {
     }
   }
 
-  private static Notification.Builder builder(Context c, String channel) {
+  static Notification.Builder builder(Context c, String channel) {
     if (Build.VERSION.SDK_INT >= 26) {
       try {
         return (Notification.Builder) Notification.Builder.class.getConstructor(Context.class, String.class).newInstance(c, channel);
@@ -56,13 +56,17 @@ final class Notifier {
   }
 
   /** @param tab tab yang dibuka saat notifikasi diketuk (0 beranda, 1 wawasan, 2 kontrol, 3 rencana, 4 proyeksi) */
-  static boolean post(Context c, int id, String channel, String title, String text, int tab, int color) {
+  static boolean post(Context c, int id, String channel, String title, String text, int tab, int color) { return post(c, id, channel, title, text, tab, color, null); }
+
+  /** @param screen layar yang dibuka setelah aplikasi tampil (mis. "inbox" = kotak saran), atau null */
+  static boolean post(Context c, int id, String channel, String title, String text, int tab, int color, String screen) {
     if (!permitted(c)) return false;
     NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
     if (nm == null) return false;
     channels(c);
     Intent open = new Intent(c, MainActivity.class)
       .putExtra("tab", tab)
+      .putExtra("open", screen == null ? "" : screen)
       .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     PendingIntent pi = PendingIntent.getActivity(c, id, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     Notification.Builder b = builder(c, channel)

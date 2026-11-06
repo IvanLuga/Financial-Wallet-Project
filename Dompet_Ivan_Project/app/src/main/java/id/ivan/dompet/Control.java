@@ -73,24 +73,43 @@ final class Control {
     e.apply();
   }
 
-  static long spentMonth(Db db, String period) { return db.spent(Fmt.monthStart(period), Fmt.monthEnd(period)); }
+  static long spentMonth(Db db, String period) { return db.spent(Fmt.cycleStart(period), Fmt.cycleEnd(period)); }
 
-  /** Batas harian: manual bila diisi; jika tidak, dihitung dari sisa batas bulanan dibagi sisa hari. */
+  /**
+   * Batas harian: manual bila diisi; jika tidak (5.0) = "aman dibelanjakan hari ini": memperhitungkan saldo,
+   * tagihan & transaksi rutin terjadwal sampai akhir siklus, dana cadangan, setoran target, dan sisa batas bulanan.
+   */
   static long dailyAllowance(Db db, Settings s, String today) {
     if (s.dayLimit > 0) return s.dayLimit;
-    if (s.monthLimit <= 0) return 0;
-    String p = Fmt.period(today);
-    long before = db.spent(Fmt.monthStart(p), Fmt.addDays(today, -1));
-    int left = Fmt.daysInMonth(p) - Fmt.day(today) + 1;
-    return Math.max(0, s.monthLimit - before) / Math.max(1, left);
+    if (db.txCount() == 0) return 0;
+    try {
+      Forecast.Safe sf = Projection.light(db).safe;
+      return sf == null ? 0 : sf.perDay;
+    } catch (RuntimeException e) { return 0; }
+  }
+
+  /** Jalur ideal pribadi dari 6 siklus terakhir; null bila dimatikan atau datanya kurang. */
+  static double[] paceCurve(Db db, String period) {
+    if (!db.flag("pace_personal", true)) return null;
+    ArrayList<long[]> cycles = new ArrayList<>();
+    for (int i = 1; i <= 6; i++) {
+      String p = Fmt.addMonths(period, -i), from = Fmt.cycleStart(p);
+      long[] daily = new long[Fmt.cycleDays(p)];
+      for (Tx t : db.range(from, Fmt.cycleEnd(p))) {
+        int k = Fmt.daysBetween(from, t.date);
+        if (t.type == Model.EXPENSE && k >= 0 && k < daily.length) daily[k] += t.amount;
+      }
+      cycles.add(daily);
+    }
+    return Analytics.paceCurve(cycles);
   }
 
   static Analytics.Pace monthPace(Db db, Settings s, String period) {
     if (s.monthLimit <= 0) return null;
     String today = Fmt.today();
-    int days = Fmt.daysInMonth(period);
-    int day = period.equals(Fmt.period(today)) ? Fmt.day(today) : period.compareTo(Fmt.period(today)) < 0 ? days : 1;
-    return Analytics.pace(s.monthLimit, spentMonth(db, period), day, days);
+    int days = Fmt.cycleDays(period);
+    int day = period.equals(Fmt.cycle(today)) ? Fmt.cycleIndex(today) : period.compareTo(Fmt.cycle(today)) < 0 ? days : 1;
+    return Analytics.pace(s.monthLimit, spentMonth(db, period), day, days, paceCurve(db, period));
   }
 
   private static int crossed(long used, long limit, int[] levels) {
@@ -112,11 +131,11 @@ final class Control {
   /** Dipanggil setelah pengeluaran disimpan. Mengirim notifikasi dan mengembalikan peringatan untuk ditampilkan di aplikasi. */
   static ArrayList<Alert> afterExpense(Context c, Db db, Tx t) {
     ArrayList<Alert> out = new ArrayList<>();
-    String today = Fmt.today(), period = Fmt.period(today);
-    if (t.type != Model.EXPENSE || !t.date.startsWith(period)) return out;
+    String today = Fmt.today(), period = Fmt.cycle(today);
+    if (t.type != Model.EXPENSE || !Fmt.cycle(t.date).equals(period)) return out;
     Settings s = load(db);
     int[] lv = levels(s);
-    int daysLeft = Fmt.daysInMonth(period) - Fmt.day(today) + 1;
+    int daysLeft = Fmt.cycleDaysLeft(today);
 
     Budget b = db.budget(period, t.cat);
     if (b != null && s.nBudget) {
@@ -149,8 +168,8 @@ final class Control {
         int hit = crossed(spentToday, allowance, dl);
         if (fresh(c, "d|" + today, hit, dl))
           out.add(new Alert(hit >= 100 ? Analytics.BAD : Analytics.WARN, "d|" + today,
-            hit >= 100 ? "Belanja hari ini melewati batas" : "Belanja hari ini sudah " + hit + "% batas",
-            "Hari ini " + Notifier.money(c, spentToday) + " dari batas harian " + Notifier.money(c, allowance) + ". Coba tanpa belanja tambahan sampai besok.", 2));
+            hit >= 100 ? (s.dayLimit > 0 ? "Belanja hari ini melewati batas" : "Belanja hari ini melewati jatah aman") : "Belanja hari ini sudah " + hit + "% " + (s.dayLimit > 0 ? "batas" : "jatah aman"),
+            "Hari ini " + Notifier.money(c, spentToday) + " dari " + (s.dayLimit > 0 ? "batas harian " : "jatah aman ") + Notifier.money(c, allowance) + ". Coba tanpa belanja tambahan sampai besok.", 2));
       }
     }
     if (s.weekLimit > 0 && s.nWeek) {
@@ -182,7 +201,7 @@ final class Control {
   /** Pengecekan malam (jam diatur pengguna): ringkasan hari ini, batas harian, kecepatan belanja, ringkasan mingguan. */
   static void evening(Context c, Db db) {
     Settings s = load(db);
-    String today = Fmt.today(), period = Fmt.period(today);
+    String today = Fmt.today(), period = Fmt.cycle(today);
     long out = db.spent(today, today);
     long in = db.scalar("SELECT COALESCE(SUM(amount),0) FROM tx WHERE type=1 AND date=?", today);
     long count = db.scalar("SELECT COUNT(*) FROM tx WHERE date=?", today);
@@ -195,12 +214,13 @@ final class Control {
       title = out == 0 ? "Hari tanpa belanja 🎉" : "Ringkasan hari ini";
       body.append("Keluar ").append(Notifier.money(c, out)).append(" · Masuk ").append(Notifier.money(c, in)).append('.');
       if (allowance > 0) {
-        if (out > allowance) { title = "Hari ini melewati batas harian"; color = 0xFFD2463E; body.append(" Lebih ").append(Notifier.money(c, out - allowance)).append(" dari batas ").append(Notifier.money(c, allowance)).append('.'); }
-        else body.append(" Masih di bawah batas harian ").append(Notifier.money(c, allowance)).append('.');
+        String what = s.dayLimit > 0 ? "batas harian" : "jatah aman";
+        if (out > allowance) { title = "Hari ini melewati " + what; color = 0xFFD2463E; body.append(" Lebih ").append(Notifier.money(c, out - allowance)).append(" dari ").append(what).append(' ').append(Notifier.money(c, allowance)).append('.'); }
+        else body.append(" Masih di bawah ").append(what).append(' ').append(Notifier.money(c, allowance)).append('.');
       }
       if (s.monthLimit > 0) {
         long used = spentMonth(db, period);
-        int left = Fmt.daysInMonth(period) - Fmt.day(today);
+        int left = Fmt.cycleDaysLeft(today) - 1;
         if (left > 0 && used < s.monthLimit) body.append(" Sisa bulan ini ").append(Notifier.money(c, s.monthLimit - used)).append(" (").append(Notifier.money(c, (s.monthLimit - used) / left)).append("/hari).");
       }
     } else if (s.nRecord && count == 0) {
@@ -220,7 +240,7 @@ final class Control {
       LinkedHashMap<String, Long> cats = Analytics.byCategory(db.range(mon, today), Model.EXPENSE);
       String top = cats.isEmpty() ? "" : " Terbesar: " + cats.keySet().iterator().next() + " (" + Notifier.money(c, cats.values().iterator().next()) + ").";
       String cmp = last > 0 ? (week > last ? " Naik " : " Turun ") + Fmt.pct(Math.abs((double) (week - last) / last)) + " dari minggu lalu." : "";
-      Notifier.post(c, Notifier.id("weekly"), Notifier.CH_SUMMARY, "Ringkasan minggu ini", "Pengeluaran " + Notifier.money(c, week) + "." + cmp + top, 1, 0xFF3D6FEC);
+      Notifier.post(c, Notifier.id("weekly"), Notifier.CH_SUMMARY, "Rapor minggu ini siap", "Pengeluaran " + Notifier.money(c, week) + "." + cmp + top + " Ketuk untuk melihat rapor.", 1, 0xFF3D6FEC, "wrap_week");
     }
   }
 
@@ -243,6 +263,26 @@ final class Control {
         "Terpakai " + Notifier.money(c, f.actual) + " dari " + Notifier.money(c, f.limit) + ". Dengan laju sekarang, akhir bulan ≈ " + Notifier.money(c, f.predicted) + ".", MainActivity.TAB_PROJECT, 0xFFD98A12);
       break;
     }
+  }
+
+  /**
+   * Audit langganan (5.0): sebulan sekali (hari ke-3 siklus), bila ada langganan yang belum dikonfirmasi
+   * "masih dipakai" dalam 90 hari, kirim satu pengingat berisi total biaya tahunan.
+   */
+  static void subscriptionAudit(Context c, Db db, String today) {
+    if (Fmt.cycleIndex(today) != 3 || !db.flag("n_subs", true)) return;
+    long annual = 0;
+    int check = 0;
+    for (Review.Sub x : Review.subscriptions(db.range(Fmt.addDays(today, -400), today), db.bills(), today)) {
+      String st = db.setting(x.key + "x", "");
+      if (!st.isEmpty() && (x.lastDate.isEmpty() || x.lastDate.compareTo(st) <= 0)) continue;
+      annual += x.annual;
+      String ok = db.setting(x.key + "o", "");
+      if (ok.isEmpty() || Fmt.daysBetween(ok, today) >= 90) check++;
+    }
+    if (check == 0 || !once(c, "subs|" + Fmt.cycle(today))) return;
+    Notifier.post(c, Notifier.id("subs"), Notifier.CH_SUMMARY, "Audit langganan: " + check + " perlu dicek",
+      "Total langganan " + Notifier.money(c, annual) + "/tahun. Masih dipakai semua? Ketuk untuk memeriksa.", 1, 0xFF8257E5, "subs");
   }
 
   /** Pengecekan pagi: tagihan & utang jatuh tempo, wishlist selesai masa tenang, cadangan, laporan bulanan. */
@@ -277,14 +317,15 @@ final class Control {
           "Data Dompet hanya tersimpan di HP ini. " + (last.isEmpty() ? "Belum pernah dicadangkan." : "Cadangan terakhir " + Fmt.dayLabel(last) + ".") + " Buka menu ⋮ → Cadangkan.", 0, 0xFF0C8A82);
     }
     if (s.nForecast && db.txCount() > 0) forecastAlerts(c, db, today);
-    if (s.nMonthly && Fmt.day(today) == 1) {
-      String prev = Fmt.addMonths(Fmt.period(today), -1);
+    if (db.txCount() > 0) subscriptionAudit(c, db, today);
+    if (s.nMonthly && Fmt.cycleIndex(today) == 1) {
+      String prev = Fmt.addMonths(Fmt.cycle(today), -1);
       if (once(c, "mr|" + prev)) {
         ArrayList<Tx> l = db.month(prev);
         long in = Analytics.sum(l, Model.INCOME), out = Analytics.sum(l, Model.EXPENSE);
         if (!l.isEmpty())
-          Notifier.post(c, Notifier.id("monthly"), Notifier.CH_SUMMARY, "Laporan " + Fmt.monthName(prev) + " siap",
-            "Masuk " + Notifier.money(c, in) + " · Keluar " + Notifier.money(c, out) + " · Bersih " + (Notifier.hidden(c) ? "Rp •••" : Fmt.signed(in - out)) + ". Ketuk untuk wawasan & PDF.", 1, 0xFF3D6FEC);
+          Notifier.post(c, Notifier.id("monthly"), Notifier.CH_SUMMARY, "Rapor " + Fmt.monthName(prev) + " siap",
+            "Masuk " + Notifier.money(c, in) + " · Keluar " + Notifier.money(c, out) + " · Bersih " + (Notifier.hidden(c) ? Fmt.masked() : Fmt.signed(in - out)) + ". Ketuk untuk melihat rapor.", 1, 0xFF3D6FEC, "wrap_month");
       }
     }
   }

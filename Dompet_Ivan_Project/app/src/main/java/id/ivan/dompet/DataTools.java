@@ -182,6 +182,397 @@ final class DataTools {
     return e;
   }
 
+  // ======================= Bulan keuangan / tanggal gajian (5.0) =======================
+
+  static String cycleLabel() { return Fmt.cycleDay <= 1 ? "Bulan kalender (tgl 1)" : "Mulai tgl " + Fmt.cycleDay + " · " + Fmt.cycleName(Fmt.cycle(Fmt.today())); }
+
+  void cycleMenu() {
+    final Ui.Sheet s = ui.sheet("Awal bulan keuangan", "Pilih tanggal gajian. Laporan, batas, amplop, jatah aman, dan prediksi akhir bulan mengikuti siklus ini.");
+    final int[] pick = {Fmt.cycleDay};
+    final TextView preview = ui.text("", 13, ui.text);
+    preview.setBackground(ui.round(ui.surface2, 14));
+    ui.pad(preview, 12, 10, 12, 10);
+    final Ui.Flow days = ui.flow();
+    final Runnable[] fill = new Runnable[1];
+    fill[0] = new Runnable() {
+      public void run() {
+        days.removeAllViews();
+        for (int d = 1; d <= 28; d++) {
+          final int v = d;
+          TextView c = ui.chip(d == 1 ? "1 (kalender)" : Integer.toString(d), d == pick[0], ui.primary);
+          c.setMinWidth(ui.dp(d == 1 ? 96 : 46));
+          ui.click(c, new Runnable() { public void run() { pick[0] = v; fill[0].run(); } });
+          days.addView(c);
+        }
+        int keep = Fmt.cycleDay;
+        Fmt.setCycleDay(pick[0]);
+        String label = Fmt.cycle(Fmt.today());
+        String text = pick[0] == 1 ? "Bulan kalender biasa: " + Fmt.monthName(label) + " = 1 – " + Fmt.day(Fmt.cycleEnd(label)) + " " + Fmt.monthShort(label) + "."
+          : "Siklus sekarang: " + Fmt.cycleName(label) + ", " + Fmt.cycleDays(label) + " hari. Siklus diberi nama bulan yang memuat sebagian besar harinya.";
+        Fmt.setCycleDay(keep);
+        preview.setText(text);
+      }
+    };
+    fill[0].run();
+    s.body.addView(days);
+    ui.gap(s.body, 10);
+    s.body.addView(preview);
+    TextView note = ui.text("Tanggal 29–31 tidak tersedia agar setiap bulan punya tanggal yang sama. Amplop yang sudah dibuat tetap tersimpan per nama bulan.", 12, ui.muted);
+    ui.pad(note, 2, 8, 0, 0);
+    s.body.addView(note);
+    s.primary("Simpan", ui.primary, new Runnable() {
+      public void run() {
+        s.dismiss();
+        db.set("cycle_day", pick[0]);
+        db.reloaded();
+        a.period = Fmt.cycle(Fmt.today());
+        a.render(true);
+        a.toast(pick[0] == 1 ? "Memakai bulan kalender" : "Bulan keuangan mulai tanggal " + pick[0]);
+      }
+    });
+    s.show();
+  }
+
+  // ======================= Kotak saran & pembaca notifikasi (5.0) =======================
+
+  void inbox() {
+    db.purgeInbox();
+    final java.util.ArrayList<Db.Suggestion> list = db.inbox();
+    final Ui.Sheet s = ui.sheet("Saran transaksi", "Dari notifikasi bank/e-wallet. Periksa dulu; tidak ada yang tercatat tanpa persetujuan Anda.");
+    if (list.isEmpty()) {
+      TextView e = ui.text("Belum ada saran. " + (NotifReader.enabled(a) && NotifReader.permitted(a) ? "Saran muncul saat ada notifikasi pembayaran dari aplikasi yang dipilih." : "Nyalakan \"Saran dari notifikasi\" di menu •••."), 14, ui.muted);
+      ui.pad(e, 0, 8, 0, 8);
+      s.body.addView(e);
+    }
+    for (final Db.Suggestion x : list) {
+      final boolean dup = db.likelyRecorded(x.type, x.amount, x.date);
+      LinearLayout row = ui.row();
+      ui.pad(row, 8, 10, 10, 10);
+      row.setBackground(ui.ripple(ui.round(ui.surface2, 14), Ui.alpha(ui.primary, 0.12f)));
+      int color = x.type == Model.INCOME ? ui.green : x.type == Model.TRANSFER ? ui.blue : ui.red;
+      row.addView(ui.badge(x.type == Model.INCOME ? "⬇️" : x.type == Model.TRANSFER ? "🔁" : "⬆️", "S", color, 36));
+      ui.hgap(row, 10);
+      LinearLayout mid = ui.col();
+      TextView title = ui.label(x.note.isEmpty() ? (x.type == Model.INCOME ? "Uang masuk" : x.type == Model.TRANSFER ? "Top up / tarik tunai" : "Pembayaran") : x.note, 14, ui.text);
+      title.setSingleLine(true);
+      mid.addView(title);
+      mid.addView(ui.text(x.source + " · " + Fmt.relativeDay(x.date) + (dup ? " · ⚠ mungkin sudah dicatat" : ""), 11.5f, dup ? ui.gold : ui.muted));
+      if (!x.raw.isEmpty()) {
+        TextView raw = ui.text(x.raw, 11, ui.faint);
+        raw.setMaxLines(2);
+        raw.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mid.addView(raw);
+      }
+      row.addView(mid, Ui.weight(1));
+      LinearLayout right = ui.col();
+      right.setGravity(Gravity.END);
+      right.addView(ui.label((x.type == Model.INCOME ? "+" : x.type == Model.EXPENSE ? "−" : "") + a.money(x.amount), 14, color));
+      right.addView(ui.link("Abaikan", ui.muted, new Runnable() { public void run() { db.setInboxStatus(x.id, 2); s.dismiss(); a.render(false); inbox(); } }));
+      row.addView(right);
+      ui.click(row, new Runnable() { public void run() { s.dismiss(); record(x); } });
+      LinearLayout.LayoutParams p = Ui.lp(Ui.MATCH, Ui.WRAP);
+      p.bottomMargin = ui.dp(6);
+      s.body.addView(row, p);
+    }
+    if (!list.isEmpty()) s.secondary("Abaikan semua", ui.muted, new Runnable() {
+      public void run() {
+        s.dismiss();
+        ui.confirm("Abaikan semua saran?", list.size() + " saran tidak akan dicatat.", "Abaikan", ui.red, new Runnable() {
+          public void run() { for (Db.Suggestion x : list) db.setInboxStatus(x.id, 2); a.render(false); }
+        });
+      }
+    });
+    s.primary("Tutup", ui.primary, new Runnable() { public void run() { s.dismiss(); } });
+    s.show();
+  }
+
+  /** Membuka formulir transaksi berisi saran; saran ditandai "dicatat" hanya bila formulir disimpan. */
+  private void record(final Db.Suggestion x) {
+    Tx t = new Tx();
+    t.type = x.type;
+    t.amount = x.amount;
+    t.date = Fmt.validIso(x.date) ? x.date : Fmt.today();
+    t.note = x.note;
+    t.cat = db.guessCategory(x.type, x.note);
+    t.account = db.settingLong("default_account", 1);
+    if (db.account(t.account) == null || db.account(t.account).archived) t.account = 1;
+    a.forms.tx(t, new Runnable() { public void run() { db.setInboxStatus(x.id, 1); } });
+  }
+
+  void notifSettings() {
+    final Ui.Sheet s = ui.sheet("Saran dari notifikasi", "Membaca notifikasi pembayaran dari aplikasi bank/e-wallet pilihan Anda, lalu menyarankan transaksi untuk dikonfirmasi.");
+    boolean perm = NotifReader.permitted(a);
+    TextView st = ui.label(perm ? "✓ Akses notifikasi sudah diizinkan" : "Akses notifikasi belum diizinkan", 14, perm ? ui.green : ui.gold);
+    s.body.addView(st);
+    if (!perm) {
+      s.body.addView(ui.text("Buka pengaturan Android, cari \"Dompet Ivan\", lalu izinkan akses notifikasi. Android akan menampilkan peringatan standar; Dompet Ivan tetap tanpa izin internet sehingga isi notifikasi tidak bisa dikirim ke mana pun.", 12.5f, ui.muted));
+      ui.gap(s.body, 6);
+      s.body.addView(ui.outline("Buka pengaturan akses notifikasi", ui.primary, new Runnable() {
+        public void run() {
+          try { a.startActivity(new android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")); }
+          catch (Exception e) { a.toast("Buka Pengaturan → Aplikasi → Akses khusus → Akses notifikasi"); }
+        }
+      }));
+    }
+    ui.gap(s.body, 8);
+    final CheckBox on = checkbox("Nyalakan saran dari notifikasi");
+    on.setChecked(NotifReader.enabled(a));
+    s.body.addView(on);
+    final CheckBox post = checkbox("Beri tahu saya saat ada saran baru");
+    post.setChecked(NotifReader.prefs(a).getBoolean("post", true));
+    s.body.addView(post);
+    ui.fieldLabel(s.body, "Aplikasi yang dibaca");
+    final java.util.Set<String> apps = NotifReader.approved(a);
+    java.util.LinkedHashMap<String, String> all = new java.util.LinkedHashMap<>();
+    for (String pkg : NotifReader.seen(a)) all.put(pkg, NotifReader.label(a, pkg) + " (terdeteksi)");
+    for (String[] k : NotifParser.KNOWN_APPS) all.put(k[0], k[1]);
+    for (String pkg : apps) if (!all.containsKey(pkg)) all.put(pkg, NotifReader.label(a, pkg));
+    final java.util.HashMap<String, CheckBox> boxes = new java.util.HashMap<>();
+    for (java.util.Map.Entry<String, String> e : all.entrySet()) {
+      CheckBox c = checkbox(e.getValue());
+      c.setChecked(apps.contains(e.getKey()));
+      boxes.put(e.getKey(), c);
+      s.body.addView(c);
+    }
+    ui.fieldLabel(s.body, "Coba dengan teks notifikasi");
+    final EditText sample = ui.input("Tempel teks notifikasi, mis. \"Pembayaran Rp25.000 di Kopi ABC berhasil\"", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE, 400);
+    s.body.addView(sample);
+    final TextView result = ui.text("", 12.5f, ui.text);
+    ui.pad(result, 2, 6, 0, 0);
+    s.body.addView(result);
+    s.body.addView(ui.link("Uji teks", ui.primary, new Runnable() {
+      public void run() {
+        NotifParser.Result r = NotifParser.parse("", sample.getText().toString());
+        result.setText(r == null ? "Tidak dikenali sebagai transaksi (akan diabaikan)."
+          : (r.type == Model.INCOME ? "Pemasukan " : r.type == Model.TRANSFER ? "Transfer/top up " : "Pengeluaran ") + Fmt.rp(r.amount) + (r.note.isEmpty() ? "" : " · " + r.note));
+      }
+    }));
+    TextView note = ui.text("Teks notifikasi hanya diproses di HP ini dan hanya dari aplikasi yang dicentang. Teks asli dihapus setelah saran dicatat atau diabaikan. OTP, promo, dan transaksi gagal diabaikan.", 12, ui.muted);
+    ui.pad(note, 2, 10, 0, 0);
+    s.body.addView(note);
+    s.primary("Simpan", ui.primary, new Runnable() {
+      public void run() {
+        java.util.HashSet<String> chosen = new java.util.HashSet<>();
+        for (java.util.Map.Entry<String, CheckBox> e : boxes.entrySet()) if (e.getValue().isChecked()) chosen.add(e.getKey());
+        NotifReader.prefs(a).edit().putBoolean("on", on.isChecked()).putBoolean("post", post.isChecked()).putStringSet("apps", chosen).apply();
+        s.dismiss();
+        a.toast(on.isChecked() ? (NotifReader.permitted(a) ? "Saran dari notifikasi aktif" : "Aktif — izinkan akses notifikasi agar berfungsi") : "Saran dari notifikasi dimatikan");
+        a.render(false);
+      }
+    });
+    s.show();
+  }
+
+  // ======================= Impor mutasi CSV (5.0) =======================
+
+  void importPreview(String text) {
+    final CsvImport.Result r = CsvImport.parse(text, Fmt.today());
+    if (r.error != null) { ui.info("Tidak bisa mengimpor", r.error); return; }
+    final java.util.ArrayList<String> expCats = db.categoryNames(Model.EXPENSE), incCats = db.categoryNames(Model.INCOME);
+    int transfers = 0;
+    for (CsvImport.Row row : r.rows) {
+      if (row.type == Model.TRANSFER) { row.skip = true; transfers++; continue; }
+      java.util.ArrayList<String> names = row.type == Model.INCOME ? incCats : expCats;
+      String match = null;
+      for (String n : names) if (n.equalsIgnoreCase(row.cat)) match = n;
+      if (match == null) match = db.guessCategory(row.type, row.desc);
+      if (match.isEmpty()) match = row.cat.isEmpty() ? "Lainnya" : row.cat;
+      row.cat = match;
+      row.duplicate = db.hasTx(row.type, row.amount, row.date);
+      row.skip = row.duplicate;
+    }
+    final int skippedTransfers = transfers;
+    final long[] acc = {db.settingLong("default_account", 1)};
+    if (db.account(acc[0]) == null) acc[0] = 1;
+    final Ui.Sheet s = ui.sheet("Impor mutasi", r.rows.size() + " baris terbaca · format: " + r.format + (r.skipped > 0 ? " · " + r.skipped + " baris dilewati" : ""));
+    final TextView summary = ui.text("", 13, ui.text);
+    summary.setBackground(ui.round(ui.surface2, 14));
+    ui.pad(summary, 12, 10, 12, 10);
+    s.body.addView(summary);
+    ui.fieldLabel(s.body, "Masukkan ke akun");
+    final LinearLayout accRow = ui.row();
+    s.body.addView(ui.hscroll(accRow));
+    final Runnable[] fillAcc = new Runnable[1];
+    fillAcc[0] = new Runnable() {
+      public void run() {
+        accRow.removeAllViews();
+        for (final Model.Account x : db.accounts(false)) {
+          TextView c = ui.chip((x.icon.isEmpty() ? "" : x.icon + " ") + x.name, x.id == acc[0], ui.primary);
+          ui.click(c, new Runnable() { public void run() { acc[0] = x.id; fillAcc[0].run(); } });
+          LinearLayout.LayoutParams p = Ui.lp(Ui.WRAP, Ui.WRAP);
+          p.rightMargin = ui.dp(8);
+          accRow.addView(c, p);
+        }
+      }
+    };
+    fillAcc[0].run();
+    ui.fieldLabel(s.body, "Ketuk baris untuk memasukkan/melewatkan · tahan untuk ganti kategori");
+    final LinearLayout list = ui.col();
+    s.body.addView(list);
+    final Runnable[] refresh = new Runnable[1];
+    refresh[0] = new Runnable() {
+      public void run() {
+        long in = 0, out = 0;
+        int n = 0, dup = 0;
+        for (CsvImport.Row row : r.rows) {
+          if (row.duplicate) dup++;
+          if (row.skip) continue;
+          n++;
+          if (row.type == Model.INCOME) in += row.amount; else out += row.amount;
+        }
+        summary.setText(n + " akan diimpor · masuk " + a.money(in) + " · keluar " + a.money(out)
+          + (dup > 0 ? "\n" + dup + " kemungkinan sudah tercatat (tanggal, jenis & nominal sama) — dilewati, ketuk untuk tetap memasukkan." : "")
+          + (skippedTransfers > 0 ? "\n" + skippedTransfers + " transfer antar-akun dilewati (catat manual agar akun tujuan benar)." : ""));
+        list.removeAllViews();
+        int shown = 0;
+        for (final CsvImport.Row row : r.rows) {
+          if (row.type == Model.TRANSFER) continue;
+          if (shown++ >= 150) { list.addView(ui.text("… dan " + (r.rows.size() - 150) + " baris lain (ikut diimpor sesuai pilihan di atas).", 12, ui.muted)); break; }
+          LinearLayout l = ui.row();
+          ui.pad(l, 6, 8, 6, 8);
+          l.setAlpha(row.skip ? 0.45f : 1f);
+          LinearLayout mid = ui.col();
+          TextView d = ui.label(row.desc.isEmpty() ? row.cat : row.desc, 13, ui.text);
+          d.setSingleLine(true);
+          d.setEllipsize(android.text.TextUtils.TruncateAt.END);
+          mid.addView(d);
+          mid.addView(ui.text(Fmt.dayLabel(row.date) + " · " + row.cat + (row.duplicate ? " · mungkin duplikat" : "") + (row.skip ? " · dilewati" : ""), 11, row.duplicate ? ui.gold : ui.muted));
+          l.addView(mid, Ui.weight(1));
+          l.addView(ui.label((row.type == Model.INCOME ? "+" : "−") + a.money(row.amount), 13, row.type == Model.INCOME ? ui.green : ui.text));
+          ui.click(l, new Runnable() { public void run() { row.skip = !row.skip; refresh[0].run(); } });
+          l.setOnLongClickListener(new android.view.View.OnLongClickListener() {
+            public boolean onLongClick(android.view.View v) { pickCategory(row, refresh[0]); return true; }
+          });
+          list.addView(l);
+        }
+      }
+    };
+    refresh[0].run();
+    s.secondary("Batal", ui.muted, new Runnable() { public void run() { s.dismiss(); } });
+    s.primary("Impor", ui.primary, new Runnable() {
+      public void run() {
+        int n = 0;
+        android.database.sqlite.SQLiteDatabase w = db.getWritableDatabase();
+        w.beginTransaction();
+        try {
+          for (CsvImport.Row row : r.rows) {
+            if (row.skip || row.type == Model.TRANSFER) continue;
+            Tx t = new Tx();
+            t.date = row.date; t.type = row.type; t.amount = row.amount; t.cat = row.cat; t.note = row.desc; t.account = acc[0];
+            Db.insertCategory(w, t.type, t.cat, "");
+            db.put(t);
+            n++;
+          }
+          w.setTransactionSuccessful();
+        } finally { w.endTransaction(); }
+        s.dismiss();
+        a.render(false);
+        ui.info("Impor selesai", n + " transaksi ditambahkan ke " + db.accountName(acc[0]) + ". Hapus satu per satu bila ada yang keliru; semuanya bisa dipulihkan dari tempat sampah.");
+      }
+    });
+    s.show();
+  }
+
+  private void pickCategory(final CsvImport.Row row, final Runnable done) {
+    final Ui.Sheet s = ui.sheet("Kategori", row.desc);
+    for (final Model.Category k : db.categories(row.type))
+      s.item(k.icon, k.name + (k.name.equals(row.cat) ? "  ✓" : ""), null, ui.primary, new Runnable() { public void run() { row.cat = k.name; done.run(); } });
+    s.show();
+  }
+
+  // ======================= Cadangan otomatis (5.0) =======================
+
+  void autoBackupSettings() {
+    final android.content.SharedPreferences p = AutoBackup.prefs(a);
+    final Ui.Sheet s = ui.sheet("Cadangan otomatis", "Menyimpan cadangan JSON berkala ke folder pilihan Anda, tanpa perlu ingat.");
+    String tree = p.getString("tree", "");
+    String folder = tree.isEmpty() ? "Belum dipilih" : android.net.Uri.decode(tree.substring(tree.lastIndexOf('/') + 1)).replace("primary:", "Memori internal/");
+    s.body.addView(ui.label("📁  " + folder, 14, tree.isEmpty() ? ui.gold : ui.text));
+    String last = p.getString("last", ""), err = p.getString("err", "");
+    s.body.addView(ui.text(last.isEmpty() ? "Belum pernah berjalan" : "Terakhir " + Fmt.dayLabel(last), 12, ui.muted));
+    if (!err.isEmpty()) s.body.addView(ui.text("Galat terakhir: " + err, 12, ui.red));
+    ui.gap(s.body, 6);
+    s.body.addView(ui.outline(tree.isEmpty() ? "Pilih folder" : "Ganti folder", ui.primary, new Runnable() { public void run() { s.dismiss(); a.pickBackupFolder(); } }));
+    ui.fieldLabel(s.body, "Seberapa sering");
+    final int[] every = {p.getInt("every", 0)};
+    final LinearLayout freq = ui.row();
+    s.body.addView(ui.hscroll(freq));
+    ui.fieldLabel(s.body, "Simpan berapa berkas terbaru");
+    final int[] keep = {p.getInt("keep", 5)};
+    final LinearLayout keepRow = ui.row();
+    s.body.addView(keepRow);
+    final Runnable[] fill = new Runnable[1];
+    fill[0] = new Runnable() {
+      public void run() {
+        freq.removeAllViews();
+        int[] vals = {0, 1, 7, 30};
+        String[] names = {"Mati", "Harian", "Mingguan", "Bulanan"};
+        for (int i = 0; i < 4; i++) {
+          final int v = vals[i];
+          TextView c = ui.chip(names[i], every[0] == v, ui.primary);
+          ui.click(c, new Runnable() { public void run() { every[0] = v; fill[0].run(); } });
+          LinearLayout.LayoutParams lp = Ui.lp(Ui.WRAP, Ui.WRAP);
+          lp.rightMargin = ui.dp(8);
+          freq.addView(c, lp);
+        }
+        keepRow.removeAllViews();
+        for (final int v : new int[]{3, 5, 10, 20}) {
+          TextView c = ui.chip(Integer.toString(v), keep[0] == v, ui.primary);
+          ui.click(c, new Runnable() { public void run() { keep[0] = v; fill[0].run(); } });
+          LinearLayout.LayoutParams lp = Ui.lp(Ui.WRAP, Ui.WRAP);
+          lp.rightMargin = ui.dp(8);
+          keepRow.addView(c, lp);
+        }
+      }
+    };
+    fill[0].run();
+    ui.fieldLabel(s.body, "Kata sandi berkas (opsional)");
+    final EditText pw = ui.input("Kosongkan = tanpa kata sandi", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD, 64);
+    pw.setText(p.getString("pw", ""));
+    s.body.addView(pw);
+    TextView note = ui.text("Dengan kata sandi, berkas dienkripsi (AES-256) dan hanya bisa dipulihkan dengan kata sandi itu. Kata sandi tidak bisa dipulihkan bila lupa — catat di tempat aman. Pilih folder yang ikut disalin ke laptop/cloud agar aman bila HP hilang.", 12, ui.muted);
+    ui.pad(note, 2, 8, 0, 0);
+    s.body.addView(note);
+    s.secondary("Cadangkan sekarang", ui.green, new Runnable() {
+      public void run() {
+        save(p, every[0], keep[0], pw.getText().toString());
+        String e = AutoBackup.run(a, db);
+        p.edit().putString("err", e == null ? "" : e).apply();
+        s.dismiss();
+        if (e == null) a.toast("Cadangan tersimpan di folder"); else ui.info("Cadangan gagal", e);
+      }
+    });
+    s.primary("Simpan", ui.primary, new Runnable() {
+      public void run() {
+        if (every[0] > 0 && p.getString("tree", "").isEmpty()) { a.toast("Pilih folder dulu"); return; }
+        save(p, every[0], keep[0], pw.getText().toString());
+        s.dismiss();
+        a.toast(every[0] > 0 ? "Cadangan otomatis aktif" : "Cadangan otomatis dimatikan");
+      }
+    });
+    s.show();
+  }
+
+  private static void save(android.content.SharedPreferences p, int every, int keep, String pw) {
+    p.edit().putInt("every", every).putInt("keep", keep).putString("pw", pw).apply();
+  }
+
+  // ======================= Widget (5.0) =======================
+
+  void widgetSettings() {
+    final Ui.Sheet s = ui.sheet("Widget layar utama", "Tahan layar utama HP → Widget → cari \"Dompet Ivan\" → seret ke layar.");
+    s.body.addView(ui.text("Widget menampilkan saldo tersedia, jatah \"aman hari ini\", dan 3 template transaksi yang paling sering dipakai. Ketuk template = langsung tercatat untuk hari ini, dengan notifikasi \"Urungkan\". Tombol + membuka formulir catat.", 13, ui.muted));
+    ui.gap(s.body, 8);
+    final CheckBox show = checkbox("Tampilkan nominal di widget" + (a.hasPin() ? " (PIN aktif: nominal disamarkan bila tidak dicentang)" : ""));
+    show.setChecked(a.prefs.getBoolean("widget_amounts", !a.hasPin()));
+    s.body.addView(show);
+    if (db.templates().isEmpty()) s.body.addView(ui.text("Belum ada template. Buat di menu → Template transaksi cepat, atau centang \"Simpan juga sebagai template\" saat mencatat.", 12.5f, ui.gold));
+    s.primary("Simpan", ui.primary, new Runnable() {
+      public void run() { a.prefs.edit().putBoolean("widget_amounts", show.isChecked()).apply(); SaldoWidget.refresh(a); s.dismiss(); }
+    });
+    s.show();
+  }
+
   // ======================= Tempat sampah =======================
 
   void trash() {

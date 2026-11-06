@@ -42,9 +42,12 @@ final class Home {
     long total = db.total(), reserved = db.totalSaved();
 
     hero(body, total, reserved, inc, exp);
+    inboxCard(body);
+    if (period.equals(Fmt.cycle(today))) wrapCard(body, today);
+    if (period.equals(Fmt.cycle(today))) a.projection.safeCard(body);
     accounts(body);
     controlStatus(body, period, today);
-    if (period.equals(Fmt.period(today))) a.projection.homeCard(body);
+    if (period.equals(Fmt.cycle(today))) a.projection.homeCard(body);
     quick(body);
     upcoming(body, today);
     categories(body, month, exp);
@@ -102,6 +105,42 @@ final class Home {
     return out;
   }
 
+  /** Kartu "rapor bulan lalu siap" (5.0) selama 3 hari pertama siklus, sampai dibuka. */
+  private void wrapCard(LinearLayout body, String today) {
+    final String prev = Fmt.addMonths(Fmt.cycle(today), -1);
+    if (Fmt.cycleIndex(today) > 3 || a.prefs.getBoolean("wrap_seen_" + prev, false) || db.month(prev).isEmpty()) return;
+    LinearLayout c = ui.card(body);
+    c.setBackground(ui.gradient(ui.heroA, ui.heroB, 22));
+    LinearLayout r = ui.row();
+    r.addView(ui.text("🎁", 28, Color.WHITE));
+    ui.hgap(r, 12);
+    LinearLayout t = ui.col();
+    t.addView(ui.label("Rapor " + Fmt.monthName(prev) + " siap", 14.5f, Color.WHITE));
+    t.addView(ui.text("Lencana, kategori terbesar, dan fakta menarik bulan lalu", 12, 0xFFC9ECE4));
+    r.addView(t, Ui.weight(1));
+    r.addView(ui.text("›", 22, 0xFFC9ECE4));
+    c.addView(r);
+    ui.click(c, new Runnable() { public void run() { a.prefs.edit().putBoolean("wrap_seen_" + prev, true).apply(); a.wrapped.showLastMonth(); a.render(false); } });
+  }
+
+  /** Kartu kotak saran (5.0): saran transaksi dari notifikasi yang menunggu konfirmasi. */
+  private void inboxCard(LinearLayout body) {
+    long n = db.inboxCount();
+    if (n == 0) return;
+    LinearLayout c = ui.card(body);
+    c.setBackground(ui.round(ui.soft(ui.blue), 22));
+    LinearLayout r = ui.row();
+    r.addView(ui.badge("📥", "S", ui.blue, 42));
+    ui.hgap(r, 12);
+    LinearLayout t = ui.col();
+    t.addView(ui.label(n + " saran transaksi menunggu", 14.5f, ui.text));
+    t.addView(ui.text("Dari notifikasi bank/e-wallet · ketuk untuk memeriksa", 12, ui.muted));
+    r.addView(t, Ui.weight(1));
+    r.addView(ui.text("›", 22, ui.faint));
+    c.addView(r);
+    ui.click(c, new Runnable() { public void run() { a.tools.inbox(); } });
+  }
+
   private void accounts(LinearLayout body) {
     ArrayList<Account> list = db.accounts(false);
     LinearLayout strip = ui.row();
@@ -142,7 +181,7 @@ final class Home {
 
   private void controlStatus(LinearLayout body, String period, String today) {
     Control.Settings s = Control.load(db);
-    if (!period.equals(Fmt.period(today))) return;
+    if (!period.equals(Fmt.cycle(today))) return;
     LinearLayout c = ui.card(body);
     if (s.monthLimit <= 0) {
       LinearLayout r = ui.row();

@@ -16,11 +16,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Cadangan JSON (schema 1–5 diterima, ekspor schema 5) dan ekspor CSV. */
+/** Cadangan JSON (schema 1–6 diterima, ekspor schema 6) dan ekspor CSV. */
 final class Backup {
   private Backup() {}
 
-  static final String[] TABLES = {"budgets", "bills", "goals", "contributions", "categories", "templates", "accounts", "debts", "wishes", "settings", "trash"};
+  static final String[] TABLES = {"budgets", "bills", "goals", "contributions", "categories", "templates", "accounts", "debts", "wishes", "settings", "trash", "inbox"};
 
   static JSONObject export(Db db) throws JSONException {
     JSONObject root = new JSONObject();
@@ -73,7 +73,7 @@ final class Backup {
     ArrayList<ArrayList<ContentValues>> parsed = new ArrayList<>();
     for (String table : TABLES) {
       ArrayList<ContentValues> rows = new ArrayList<>();
-      boolean present = table.equals("trash") ? schema >= 5 : schema >= 4
+      boolean present = table.equals("inbox") ? schema >= 6 : table.equals("trash") ? schema >= 5 : schema >= 4
         || (schema >= 3 && Arrays.asList("budgets", "bills", "goals", "contributions", "categories", "templates").contains(table))
         || (schema >= 2 && Arrays.asList("budgets", "bills", "goals", "contributions").contains(table));
       JSONArray arr = present ? b.optJSONArray(table) : null;
@@ -88,7 +88,7 @@ final class Backup {
             String m = o.getString("period"), cat = o.getString("category");
             long lim = o.getLong("lim");
             check(m.matches("\\d{4}-\\d{2}") && text(cat, 80, false) && amountOk(lim), "Anggaran");
-            v.put("period", m); v.put("category", cat); v.put("lim", lim);
+            v.put("period", m); v.put("category", cat); v.put("lim", lim); v.put("rollover", o.optInt("rollover", 0) != 0 ? 1 : 0);
             break;
           }
           case "bills": {
@@ -102,8 +102,9 @@ final class Backup {
           case "goals": {
             long id = o.getLong("id"), target = o.getLong("target");
             String nm = o.getString("name"), deadline = o.optString("deadline", "");
-            check(id > 0 && amountOk(target) && text(nm, 60, false) && (deadline.isEmpty() || Fmt.validIso(deadline)), "Target");
-            v.put("id", id); v.put("name", nm); v.put("target", target); v.put("deadline", deadline);
+            long acc = o.optLong("account", 0);
+            check(id > 0 && amountOk(target) && text(nm, 60, false) && (deadline.isEmpty() || Fmt.validIso(deadline)) && acc >= 0, "Target");
+            v.put("id", id); v.put("name", nm); v.put("target", target); v.put("deadline", deadline); v.put("account", acc);
             break;
           }
           case "contributions": {
@@ -161,10 +162,21 @@ final class Backup {
             v.put("category", cat); v.put("note", note); v.put("account", acc); v.put("to_account", to);
             break;
           }
+          case "inbox": {
+            long id = o.getLong("id"), amount = o.getLong("amount");
+            int type = o.getInt("type"), status = o.optInt("status", 0);
+            String created = o.getString("created"), date = o.getString("date"), source = o.getString("source"), note = o.optString("note", ""), raw = o.optString("raw", ""), fp = o.getString("fp");
+            check(id > 0 && amountOk(amount) && type >= 0 && type <= 2 && status >= 0 && status <= 2 && Fmt.validIso(created) && Fmt.validIso(date)
+              && text(source, 40, false) && text(note, 160, true) && text(raw, 300, true) && text(fp, 80, false), "Kotak saran");
+            v.put("id", id); v.put("created", created); v.put("date", date); v.put("source", source); v.put("type", type);
+            v.put("amount", amount); v.put("note", note); v.put("raw", raw); v.put("fp", fp); v.put("status", status);
+            break;
+          }
           default: { // settings
             String key = o.getString("key"), value = o.getString("value");
             check(key.matches("[a-z0-9_]{1,40}") && value.length() <= 200, "Pengaturan");
             if (key.equals("currency")) check(Fmt.currency(value).code.equals(value), "Mata uang");
+            if (key.equals("cycle_day")) check(value.matches("[0-9]{1,2}") && Integer.parseInt(value) >= 1 && Integer.parseInt(value) <= 28, "Awal bulan keuangan");
             v.put("key", key); v.put("value", value);
           }
         }
@@ -195,7 +207,7 @@ final class Backup {
     try {
       for (String table : TABLES) d.delete(table, null, null);
       d.delete("tx", null, null);
-      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','bills','goals','contributions','templates','accounts','debts','wishes','trash')");
+      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','bills','goals','contributions','templates','accounts','debts','wishes','trash','inbox')");
       for (Tx t : list) {
         ContentValues v = new ContentValues();
         v.put("date", t.date); v.put("type", t.type); v.put("amount", t.amount); v.put("category", t.cat); v.put("note", t.note);

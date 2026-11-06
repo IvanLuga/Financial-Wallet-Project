@@ -65,6 +65,7 @@ final class Projection {
     long available;
     int confidence;
     Control.Settings settings;
+    Forecast.Safe safe;
     double incGrowth, inflation, ret;
 
     /** Rata-rata prediksi 3 bulan ke depan: [0] masuk, [1] keluar per bulan. */
@@ -81,11 +82,17 @@ final class Projection {
 
   static double assumption(Db db, String key, int defPermille) { return db.settingLong(key, defPermille) / 1000.0; }
 
+  /**
+   * Pengali angka kebebasan finansial (5.0, bawaan 30×). 25× (aturan 4%) berasal dari data pasar AS; dengan
+   * inflasi Indonesia yang lebih tinggi, 30–33× (penarikan ±3–3,3%/tahun) lebih aman.
+   */
+  static int fiMultiple(Db db) { return (int) Math.max(15, Math.min(50, db.settingLong("fi_multiple", 30))); }
+
   /** @param full false = cukup untuk kartu beranda & notifikasi (tanpa riwayat bulanan). */
   static Ctx compute(Db db, boolean full) {
     Ctx c = new Ctx();
     c.today = Fmt.today();
-    String cur = Fmt.period(c.today);
+    String cur = Fmt.period(c.today), cyc = Fmt.cycle(c.today);
     c.txs = db.range(Fmt.monthStart(Fmt.addMonths(cur, full ? -25 : -7)), "9999-12-31");
     c.bills = db.bills();
     c.debts = db.debts(true);
@@ -93,11 +100,12 @@ final class Projection {
     c.items = Forecast.schedule(c.base.recurring, c.bills, c.debts, c.today, Fmt.addDays(c.today, full ? 400 : 62));
     c.available = db.total() - db.totalSaved();
     HashMap<String, Long> budgets = new HashMap<>();
-    for (Budget b : db.budgets(cur)) budgets.put(b.category, b.limit);
+    for (Budget b : db.budgets(cyc)) budgets.put(b.category, b.limit);
     ArrayList<Tx> month = new ArrayList<>();
-    for (Tx t : c.txs) if (Fmt.period(t.date).equals(cur)) month.add(t);
+    for (Tx t : c.txs) if (Fmt.cycle(t.date).equals(cyc)) month.add(t);
     c.me = Forecast.monthEnd(c.base, month, c.items, c.today, budgets);
     c.settings = Control.load(db);
+    c.safe = safe(db, c);
     c.incGrowth = assumption(db, "asm_inc", 30);
     c.inflation = assumption(db, "asm_infl", 30);
     c.ret = assumption(db, "asm_ret", 0);
@@ -107,6 +115,115 @@ final class Projection {
       c.confidence = Forecast.confidence(c.base, c.monthly);
     }
     return c;
+  }
+
+  private static Ctx lightCache;
+  private static String lightKey;
+
+  /**
+   * compute(db, false) yang di-cache selama data tidak berubah (total_changes() koneksi ini), hari, mata uang,
+   * dan siklus sama — dipakai beranda, kontrol, dan pengecekan notifikasi agar tidak dihitung ulang berkali-kali.
+   */
+  static synchronized Ctx light(Db db) {
+    String key = System.identityHashCode(db) + "|" + Fmt.today() + "|" + db.scalar("SELECT total_changes()") + "|" + Fmt.cur.code + "|" + Fmt.cycleDay;
+    if (lightCache != null && key.equals(lightKey)) return lightCache;
+    lightCache = compute(db, false);
+    lightKey = key;
+    return lightCache;
+  }
+
+  /** Setoran target per siklus: sisa target bertenggat ÷ bulan tersisa (target tanpa tenggat tidak dihitung). */
+  static long goalsPerCycle(Db db, String today) {
+    long sum = 0;
+    for (Model.Goal g : db.goals()) {
+      if (g.saved >= g.target || !Fmt.validIso(g.deadline) || g.deadline.compareTo(today) < 0) continue;
+      sum += (g.target - g.saved) / Math.max(1, Analytics.monthsBetween(Fmt.period(today), Fmt.period(g.deadline)));
+    }
+    return sum;
+  }
+
+  static long safeBuffer(Db db) { return Math.max(0, db.settingLong("safe_buffer", Fmt.th(100_000))); }
+
+  static Forecast.Safe safe(Db db, Ctx c) {
+    String cyc = Fmt.cycle(c.today);
+    long limitLeft = c.settings.monthLimit > 0 ? c.settings.monthLimit - db.spent(Fmt.cycleStart(cyc), Fmt.addDays(c.today, -1)) : -1;
+    return Forecast.safeToSpend(c.available, db.spent(c.today, c.today), c.items, c.today, Fmt.cycleEnd(cyc), safeBuffer(db),
+      goalsPerCycle(db, c.today), Fmt.cycleDays(cyc), limitLeft);
+  }
+
+  /** Kartu beranda "Aman dibelanjakan hari ini" (5.0). */
+  void safeCard(LinearLayout body) {
+    final Ctx c;
+    try { c = light(db); } catch (RuntimeException e) { return; }
+    final Forecast.Safe s = c.safe;
+    if (s == null || db.txCount() == 0) return;
+    LinearLayout card = ui.card(body);
+    boolean over = s.leftToday < 0;
+    int color = over ? ui.red : s.perDay == 0 ? ui.gold : ui.green;
+    LinearLayout r = ui.row();
+    LinearLayout t = ui.col();
+    t.addView(ui.caps(over ? "Lewat dari jatah aman hari ini" : "Aman dibelanjakan hari ini", color));
+    TextView big = ui.title(a.money(Math.abs(s.leftToday)), 26);
+    big.setTextColor(over ? ui.red : ui.text);
+    t.addView(big);
+    t.addView(ui.text(a.money(s.perDay) + "/hari sampai " + Fmt.dayShort(s.end) + (s.spentToday > 0 ? " · hari ini sudah " + a.money(s.spentToday) : "")
+      + (s.limitBinds ? " · mengikuti sisa batas bulanan" : ""), 12, ui.muted));
+    r.addView(t, Ui.weight(1));
+    r.addView(ui.badge(over ? "✋" : "🟢", "A", color, 44));
+    card.addView(r);
+    if (s.perDay > 0) ui.bar(card, Math.min(1, (double) s.spentToday / s.perDay), color, 8);
+    ui.click(card, new Runnable() { public void run() { safeDetail(c); } });
+  }
+
+  void safeDetail(Ctx c) {
+    final Forecast.Safe s = c.safe;
+    final Ui.Sheet sh = ui.sheet("Aman dibelanjakan", "Sampai akhir siklus " + Fmt.dayLabel(s.end) + " · " + s.daysLeft + " hari termasuk hari ini");
+    String[][] rows = {
+      {"Saldo tersedia awal hari ini", a.money(s.opening)},
+      {"+ Pemasukan terjadwal (dihitung setelah tanggalnya)", a.money(s.incomeAhead)},
+      {"− Tagihan, cicilan, utang & transaksi rutin terjadwal", a.money(s.expenseAhead)},
+      {"− Dana cadangan minimum", a.money(s.buffer)},
+      {"− Setoran target bertenggat (sisa siklus)", a.money(s.goalsAside)},
+    };
+    for (String[] row : rows) {
+      LinearLayout l = ui.row();
+      ui.pad(l, 0, 6, 0, 6);
+      l.addView(ui.text(row[0], 13, ui.muted), Ui.weight(1));
+      l.addView(ui.label(row[1], 13.5f, ui.text));
+      sh.body.addView(l);
+    }
+    ui.divider(sh.body);
+    LinearLayout tot = ui.row();
+    tot.addView(ui.label("Aman per hari", 15, ui.text), Ui.weight(1));
+    tot.addView(ui.title(a.money(s.perDay), 17));
+    sh.body.addView(tot);
+    StringBuilder why = new StringBuilder();
+    why.append("Angka ini adalah belanja harian tetap tertinggi yang membuat saldo tidak pernah turun di bawah dana cadangan pada hari mana pun sampai ").append(Fmt.dayLabel(s.end)).append('.');
+    if (s.bindDate != null && !s.bindDate.equals(s.end)) why.append(" Hari terketat: ").append(Fmt.dayShort(s.bindDate)).append(" — sebelum pemasukan berikutnya atau setelah tagihan besar.");
+    if (s.limitPerDay >= 0) why.append(s.limitBinds ? " Dibatasi sisa batas bulanan setelah tagihan terjadwal (" + a.money(s.limitPerDay) + "/hari)." : " Batas bulanan masih longgar (" + a.money(s.limitPerDay) + "/hari).");
+    if (Fmt.cycleDay > 1) why.append(" Siklus mengikuti tanggal gajian (mulai tgl ").append(Fmt.cycleDay).append(").");
+    TextView w = ui.text(why.toString(), 12.5f, ui.muted);
+    w.setLineSpacing(0, 1.2f);
+    ui.pad(w, 0, 10, 0, 0);
+    sh.body.addView(w);
+    sh.secondary("Ubah dana cadangan", ui.primary, new Runnable() { public void run() { sh.dismiss(); editBuffer(); } });
+    sh.primary("Mengerti", ui.primary, new Runnable() { public void run() { sh.dismiss(); } });
+    sh.show();
+  }
+
+  void editBuffer() {
+    final Ui.Sheet sh = ui.sheet("Dana cadangan minimum", "Saldo yang tidak dihitung sebagai \"aman dibelanjakan\", untuk keperluan tak terduga.");
+    final EditText e = ui.moneyInput(Fmt.rp(0), safeBuffer(db));
+    sh.body.addView(e);
+    sh.primary("Simpan", ui.primary, new Runnable() {
+      public void run() {
+        long v = Fmt.parseAmount(e.getText().toString());
+        db.set("safe_buffer", Math.max(0, v));
+        sh.dismiss();
+        a.render(false);
+      }
+    });
+    sh.show();
   }
 
   // ======================= Kerangka =======================
@@ -660,7 +777,7 @@ final class Projection {
   // ---------------- Tahunan ----------------
 
   private void yearlyView(LinearLayout body, final Ctx c) {
-    final Forecast.Yearly y = Forecast.yearly(c.txs, c.me, c.monthly, c.today, c.available, c.incGrowth, c.inflation, c.ret, yearsAhead, 25);
+    final Forecast.Yearly y = Forecast.yearly(c.txs, c.me, c.monthly, c.today, c.available, c.incGrowth, c.inflation, c.ret, yearsAhead, fiMultiple(db));
     LinearLayout hero = ui.card(body);
     hero.setBackground(ui.gradient(ui.heroA, ui.heroB, 24));
     hero.addView(ui.caps("Proyeksi akhir tahun " + y.year, 0xFFB8E3DA));
@@ -730,7 +847,8 @@ final class Projection {
     note(card, "Tahun ke-1 = 12 bulan ke depan dari model bulanan; tahun berikutnya tumbuh sesuai asumsi. Imbal hasil hanya dihitung untuk saldo positif.");
 
     LinearLayout fi = ui.card(body);
-    head(fi, "Kebebasan finansial", "Aturan praktis 25× pengeluaran tahunan (≈ penarikan 4%/tahun)");
+    int fim = fiMultiple(db);
+    head(fi, "Kebebasan finansial", "Aturan praktis " + fim + "× pengeluaran tahunan (≈ penarikan " + pct1(1.0 / fim) + "/tahun) · ubah di menu → Asumsi proyeksi");
     ui.gap(fi, 4);
     line(fi, "Angka target", a.money(y.fiNumber), ui.purple);
     line(fi, "Dengan pola sekarang", y.fiNumber <= 0 ? "–" : y.fiYear > 0 ? "± tahun ke-" + y.fiYear : "belum tercapai dalam 50 tahun", y.fiYear > 0 ? ui.green : ui.gold);
@@ -767,9 +885,13 @@ final class Projection {
     final EditText inc = pctInput(s.body, "Kenaikan pemasukan (%/tahun)", assumption(db, "asm_inc", 30));
     final EditText inf = pctInput(s.body, "Inflasi / kenaikan pengeluaran (%/tahun)", assumption(db, "asm_infl", 30));
     final EditText ret = pctInput(s.body, "Imbal hasil saldo/tabungan (%/tahun)", assumption(db, "asm_ret", 0));
-    note(s.body, "Bawaan: pemasukan +3%, inflasi 3%, imbal hasil 0% (uang hanya disimpan). Sesuaikan dengan kondisimu; imbal hasil investasi tidak dijamin.");
+    ui.fieldLabel(s.body, "Angka kebebasan finansial (× pengeluaran tahunan, 15–50)");
+    final EditText fim = ui.input("30", android.text.InputType.TYPE_CLASS_NUMBER, 2);
+    fim.setText(Integer.toString(fiMultiple(db)));
+    s.body.addView(fim);
+    note(s.body, "Bawaan: pemasukan +3%, inflasi 3%, imbal hasil 0% (uang hanya disimpan), kebebasan finansial 30× (penarikan ±3,3%/tahun; 25× = aturan 4% dari data pasar AS). Sesuaikan dengan kondisimu; imbal hasil investasi tidak dijamin.");
     s.secondary("Bawaan", ui.muted, new Runnable() {
-      public void run() { db.set("asm_inc", 30); db.set("asm_infl", 30); db.set("asm_ret", 0); s.dismiss(); a.render(false); }
+      public void run() { db.set("asm_inc", 30); db.set("asm_infl", 30); db.set("asm_ret", 0); db.set("fi_multiple", 30); s.dismiss(); a.render(false); }
     });
     s.primary("Simpan", ui.primary, new Runnable() {
       public void run() {
@@ -777,7 +899,10 @@ final class Projection {
         if (!validPct(i)) { inc.setError("−20 s.d. 50"); return; }
         if (!validPct(f)) { inf.setError("−20 s.d. 50"); return; }
         if (!validPct(r)) { ret.setError("−20 s.d. 50"); return; }
-        db.set("asm_inc", Simulator.permille(i)); db.set("asm_infl", Simulator.permille(f)); db.set("asm_ret", Simulator.permille(r));
+        int m;
+        try { m = Integer.parseInt(fim.getText().toString().trim()); } catch (NumberFormatException e) { m = -1; }
+        if (m < 15 || m > 50) { fim.setError("15 s.d. 50"); return; }
+        db.set("asm_inc", Simulator.permille(i)); db.set("asm_infl", Simulator.permille(f)); db.set("asm_ret", Simulator.permille(r)); db.set("fi_multiple", m);
         s.dismiss();
         a.render(false);
       }
@@ -1566,7 +1691,7 @@ final class Projection {
         if (tg <= 0) { target.setError("Isi target"); return; }
         int dl = parseInt(deadline.getText().toString(), 0);
         String due = dl > 0 ? Fmt.monthEnd(Fmt.addMonths(Fmt.period(Fmt.today()), dl)) : "";
-        db.putGoal(update ? fp.id : 0, n.length() > 60 ? n.substring(0, 60) : n, tg, due);
+        db.putGoal(update ? fp.id : 0, n.length() > 60 ? n.substring(0, 60) : n, tg, due, update ? fp.account : 0);
         t.s.dismiss();
         a.toast(update ? "Target diperbarui" : "Target ditambahkan di tab Rencana");
       }
@@ -1854,11 +1979,12 @@ final class Projection {
         t.result("Hasil investasi", a.signed(fv - paid), fv >= paid ? ui.green : ui.red);
         t.result("Daya beli setara hari ini", a.money(real), ui.text);
         if (an > 0) {
-          Simulator.Fi fi = Simulator.fi(st, mo, r, an, inf, 25);
-          t.result("Angka kebebasan finansial (25×)", a.money(fi.number), ui.text);
+          int fim = fiMultiple(db);
+          Simulator.Fi fi = Simulator.fi(st, mo, r, an, inf, fim);
+          t.result("Angka kebebasan finansial (" + fim + "×)", a.money(fi.number), ui.text);
           t.result("Perkiraan tercapai", fi.months < 0 ? "> 60 tahun" : Simulator.duration(fi.months), fi.months >= 0 && fi.months <= 360 ? ui.green : ui.gold);
         }
-        t.text("Imbal hasil tidak dijamin; tiap instrumen punya risiko berbeda (bisa rugi). Angka 25× = aturan praktis penarikan ±4%/tahun, bukan jaminan.", ui.muted);
+        t.text("Imbal hasil tidak dijamin; tiap instrumen punya risiko berbeda (bisa rugi). Angka " + fiMultiple(db) + "× = aturan praktis penarikan ±" + pct1(1.0 / fiMultiple(db)) + "/tahun, bukan jaminan.", ui.muted);
       }
     };
     t.s.primary("Selesai", ui.primary, new Runnable() { public void run() { t.s.dismiss(); } });
@@ -1869,7 +1995,7 @@ final class Projection {
 
   void homeCard(LinearLayout body) {
     final Ctx c;
-    try { c = compute(db, false); } catch (RuntimeException e) { return; }
+    try { c = light(db); } catch (RuntimeException e) { return; }
     if (c.base.first == null || c.base.lookback < 7) return;
     Forecast.Cash cash = Forecast.cash(c.base, c.items, c.available, c.today, 30);
     LinearLayout card = ui.card(body);

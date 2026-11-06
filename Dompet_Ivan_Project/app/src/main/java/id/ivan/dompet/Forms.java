@@ -58,8 +58,15 @@ final class Forms {
 
   // ======================= Formulir transaksi =======================
 
+  private Runnable pendingSaved;
+
+  /** Seperti tx(init), lalu menjalankan onSaved setelah transaksi tersimpan (mis. menandai saran sebagai dicatat). */
+  void tx(Tx init, Runnable onSaved) { pendingSaved = onSaved; tx(init); }
+
   /** @param init null = transaksi baru; id 0 = isian awal (template/duplikat); id > 0 = ubah transaksi. */
   void tx(Tx init) {
+    final Runnable savedHook = pendingSaved;
+    pendingSaved = null;
     final boolean existing = init != null && init.id > 0;
     final Tx t = init == null ? new Tx() : init.copy();
     if (init == null) {
@@ -334,6 +341,7 @@ final class Forms {
         } finally { w.endTransaction(); }
         if (t.type != Model.TRANSFER) db.set("default_account", t.account);
         s.dismiss();
+        if (savedHook != null) savedHook.run();
         a.afterSave(t, !existing);
       }
     });
@@ -499,7 +507,7 @@ final class Forms {
     ui.pad(m, 0, 10, 0, 4);
     s.body.addView(m);
     s.body.addView(ui.text("Peringatan ini juga dikirim sebagai notifikasi. Atur jenis & ambangnya di tab Kontrol.", 12, ui.muted));
-    s.secondary("Lihat kontrol", ui.primary, new Runnable() { public void run() { s.dismiss(); a.period = Fmt.period(Fmt.today()); a.go(MainActivity.TAB_CONTROL); } });
+    s.secondary("Lihat kontrol", ui.primary, new Runnable() { public void run() { s.dismiss(); a.period = Fmt.cycle(Fmt.today()); a.go(MainActivity.TAB_CONTROL); } });
     s.primary("Mengerti", x.level == Analytics.BAD ? ui.red : ui.gold, new Runnable() { public void run() { s.dismiss(); } });
     s.show();
   }
@@ -512,7 +520,7 @@ final class Forms {
     s.body.addView(q);
     final int[] type = {-1};
     final String[] cat = {""};
-    final String[] range = {Fmt.monthStart(a.period), Fmt.monthEnd(a.period)};
+    final String[] range = {Fmt.cycleStart(a.period), Fmt.cycleEnd(a.period)};
     final boolean[] all = {false};
     final long[] acc = {0};
     ui.fieldLabel(s.body, "Jenis");
@@ -857,15 +865,16 @@ final class Forms {
       {"📊", "Wawasan & laporan PDF", "Skor kesehatan, tren, kalender, pola hari, ekspor PDF bergrafik"},
       {"🛡️", "Kontrol & peringatan boros", "Batas bulanan/mingguan/harian, kecepatan belanja, notifikasi otomatis"},
       {"👛", "Multi-akun & transfer", "Tunai, bank, e-wallet dengan saldo masing-masing"},
-      {"💱", "Pilih mata uang", "Rupiah, dolar, euro, ringgit, yen, dan lainnya (menu •••)"},
-      {"🌙", "Mode gelap, PIN & sidik jari", "Tema mengikuti sistem, kunci aplikasi dengan PIN atau sidik jari"}
+      {"🟢", "Aman dibelanjakan hari ini", "Jatah harian yang sudah memperhitungkan tagihan, target, dan dana cadangan"},
+      {"📆", "Bulan mulai tanggal gajian", "Atur di menu ••• → Awal bulan keuangan"},
+      {"💱", "Pilih mata uang", "Rupiah, dolar, euro, ringgit, yen, dan lainnya (menu •••)"}
     } : new String[][]{
-      {"💱", "Ganti mata uang", "18 mata uang, sen/desimal, konversi semua nominal dengan kurs Anda sendiri"},
-      {"🧹", "Reset keuangan yang aman", "Mulai dari nol seperti baru; dilindungi PIN, ketik RESET, dan bisa dibatalkan 7 hari"},
-      {"🗑️", "Tempat sampah", "Transaksi terhapus disimpan 30 hari dan bisa dipulihkan"},
-      {"🔁", "Tagihan fleksibel", "Mingguan, 2 mingguan, bulanan, 3/6 bulanan, atau tahunan (pajak, asuransi)"},
-      {"👆", "Buka dengan sidik jari", "Aktifkan di menu → PIN (perlu PIN dan sensor sidik jari)"},
-      {"🛠️", "Perbaikan & keamanan", "Jeda setelah PIN salah berkali-kali, perbaikan ikon setelah pulihkan, dan lainnya"}
+      {"📆", "Bulan dari tanggal gajian", "Laporan, batas, amplop, dan prediksi mengikuti siklus gaji (menu ••• → Awal bulan keuangan)"},
+      {"🟢", "Aman dibelanjakan hari ini", "Di Beranda: jatah harian setelah tagihan terjadwal, setoran target, dan dana cadangan"},
+      {"📥", "Saran dari notifikasi & impor CSV", "Notifikasi bank/e-wallet jadi saran 1 ketukan; impor mutasi rekening (menu •••)"},
+      {"🧩", "Widget & cadangan otomatis", "Widget saldo + catat 1 ketukan; cadangan berkala ke folder, bisa berkata sandi"},
+      {"🎁", "Rapor, inflasi pribadi, langganan", "Di tab Wawasan: rapor mingguan/bulanan, kenaikan harga barangmu, audit langganan"},
+      {"🎯", "Target tertaut akun & amplop terbawa", "Target bisa memakai saldo akun tabungan; sisa amplop pindah ke bulan berikutnya"}
     };
     for (String[] it : items) {
       LinearLayout row = ui.row();
@@ -898,6 +907,8 @@ final class Forms {
       "• Notifikasi bergantung pada izin notifikasi dan penghemat baterai; waktunya bisa bergeser beberapa menit hingga jam.\n" +
       "• Skor kesehatan, wawasan, prediksi, dan simulasi dihitung dari data & asumsi Anda. Ini alat bantu, bukan nasihat keuangan profesional; imbal hasil investasi tidak dijamin.\n" +
       "• Kurs mata uang tidak diambil dari internet. Konversi memakai kurs yang Anda ketik sendiri.\n" +
+      "• Saran dari notifikasi hanya membaca aplikasi yang Anda pilih, diproses di HP, dan tidak pernah mencatat tanpa persetujuan Anda.\n" +
+      "• Cadangan berkata sandi tidak bisa dibuka bila kata sandinya lupa.\n" +
       "• Mode privasi hanya menyamarkan tampilan; berkas PDF/CSV/JSON tetap berisi nominal asli.\n" +
       "• PIN tidak bisa dipulihkan jika lupa. Sidik jari hanya pintasan untuk PIN.");
   }

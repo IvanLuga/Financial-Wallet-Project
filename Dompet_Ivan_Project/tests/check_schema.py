@@ -1,4 +1,4 @@
-"""Uji migrasi database & validitas SQL Dompet Ivan 4.0 (skema 5) dengan SQLite (bukan uji UI Android).
+"""Uji migrasi database & validitas SQL Dompet Ivan 5.0 (skema 6) dengan SQLite (bukan uji UI Android).
 
 Membaca SQL langsung dari Schema.java / Db.java / Backup.java / Control.java lalu:
   1. membuat database versi lama (v1, v2, v2.5) berisi data contoh,
@@ -27,7 +27,7 @@ def array(name):
     return [java_str(x) for x in re.findall(r'"((?:\\.|[^"\\])*)"', block)]
 
 
-V1, V2, V3, V4, V5 = array("V1"), array("V2"), array("V3"), array("V4"), array("V5")
+V1, V2, V3, V4, V5, V6 = array("V1"), array("V2"), array("V3"), array("V4"), array("V5"), array("V6")
 EXP, INC = array("EXP"), array("INC")
 ICONS = [tuple(java_str(y) for y in re.findall(r'"((?:\\.|[^"\\])*)"', p))
          for p in re.findall(r"\{(\"[^{}]*?\", \"[^{}]*?\")\}", re.search(r"DEFAULT_ICONS = \{(.*?)\};", schema, re.S).group(1))]
@@ -77,6 +77,8 @@ def upgrade(con, old):
         seed_icons(con)
     if old < 5:
         for s in V5: con.execute(s)
+    if old < 6:
+        for s in V6: con.execute(s)
 
 
 def legacy(version):
@@ -145,14 +147,17 @@ for version in (1, 2, 3, 4):
     assert con.execute("SELECT icon FROM categories WHERE type=0 AND name='Makan & minum'").fetchone()[0] == "🍜"
     assert con.execute("SELECT COUNT(*) FROM categories WHERE type=0 AND name='perawatan motor'").fetchone()[0] == 1, "kategori dari transaksi lama hilang"
     assert con.execute("SELECT COUNT(*) FROM trash").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM inbox").fetchone()[0] == 0
     if version >= 2:
         assert con.execute("SELECT freq FROM bills").fetchone()[0] == 0, "tagihan lama harus tetap bulanan"
         assert con.execute("SELECT deadline FROM goals").fetchone()[0] == ""
+        assert con.execute("SELECT account FROM goals").fetchone()[0] == 0, "target lama tidak tertaut akun"
+        assert con.execute("SELECT rollover FROM budgets").fetchall() in ([], [(0,)]), "amplop lama tanpa sisa terbawa"
         assert con.execute("SELECT SUM(amount) FROM contributions").fetchone()[0] == 500000
     if version >= 3:
         assert con.execute("SELECT account FROM templates").fetchone()[0] == 1
     results.append(con)
-    print(f"PASS migrasi v{version} -> skema 5: transaksi, saldo, kategori, akun utama, target, template, tagihan bulanan")
+    print(f"PASS migrasi v{version} -> skema 6: transaksi, saldo, kategori, akun utama, target, template, tagihan bulanan")
 
 fresh = sqlite3.connect(":memory:")
 with fresh:
@@ -203,7 +208,7 @@ assert set(re.findall(r'"(\w+)"', tx_cols)) <= {r[1] for r in con.execute("PRAGM
 for table in ("tx", "accounts", "debts", "wishes", "goals", "templates", "bills", "budgets", "settings", "categories", "contributions"):
     existing = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
     assert existing, table
-print(f"PASS {checked} pernyataan SQL/kolom di kode sumber valid terhadap skema 5")
+print(f"PASS {checked} pernyataan SQL/kolom di kode sumber valid terhadap skema 6")
 
 # Kolom nominal (konversi mata uang) & tabel reset harus ada.
 for table, col in re.findall(r'\{"(\w+)", "(\w+)"\}', re.search(r"MONEY_COLUMNS = \{(.*?)\};", db_src, re.S).group(1)):

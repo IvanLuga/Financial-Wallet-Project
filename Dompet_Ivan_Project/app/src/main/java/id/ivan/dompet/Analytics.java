@@ -75,6 +75,7 @@ final class Analytics {
     long limit, spent, ideal, projected, remaining, perDayLeft;
     int day, days, status; // 0 aman, 1 waspada, 2 boros (proyeksi lewat), 3 sudah melewati batas
     double used;
+    boolean personal; // jalur ideal dari pola belanja sendiri (5.0)
 
     String label() { return status == 0 ? "Aman" : status == 1 ? "Waspada" : status == 2 ? "Boros" : "Melewati batas"; }
   }
@@ -93,6 +94,79 @@ final class Analytics {
     else if (limit > 0 && p.projected > limit * 95 / 100) p.status = 1;
     else p.status = 0;
     return p;
+  }
+
+  /**
+   * Kecepatan belanja dengan jalur ideal pribadi (5.0). curve[i] = porsi pengeluaran siklus yang biasanya sudah
+   * terpakai setelah i% siklus berjalan (101 titik, curve[100] = 1); null = jalur lurus seperti sebelumnya.
+   */
+  static Pace pace(long limit, long spent, int day, int days, double[] curve) {
+    Pace p = pace(limit, spent, day, days);
+    if (curve == null || curve.length != 101 || limit <= 0) return p;
+    double f = curveAt(curve, (double) p.day / p.days);
+    if (f < 0.03) return p;
+    p.ideal = Math.round(limit * f);
+    p.projected = Math.round(spent / f);
+    if (spent >= limit) p.status = 3;
+    else if (p.day >= 3 && p.projected > limit * 11 / 10) p.status = 2;
+    else if (p.projected > limit * 95 / 100) p.status = 1;
+    else p.status = 0;
+    p.personal = true;
+    return p;
+  }
+
+  static double curveAt(double[] curve, double x) {
+    double pos = Math.max(0, Math.min(1, x)) * 100;
+    int i = (int) Math.floor(pos);
+    if (i >= 100) return curve[100];
+    return curve[i] + (curve[i + 1] - curve[i]) * (pos - i);
+  }
+
+  /**
+   * Membangun jalur pribadi dari siklus-siklus lalu. cycles[c][d] = pengeluaran hari ke-d siklus c (panjang siklus
+   * boleh berbeda). Butuh ≥3 siklus berisi pengeluaran; transaksi tunggal yang sangat besar (≥40% siklus) diratakan
+   * agar satu pembelian besar tidak membentuk pola. Median antar-siklus, lalu dibuat naik monoton dan berakhir di 1.
+   */
+  static double[] paceCurve(List<long[]> cycles) {
+    ArrayList<double[]> shapes = new ArrayList<>();
+    for (long[] daily : cycles) {
+      if (daily == null || daily.length < 7) continue;
+      long total = 0;
+      for (long v : daily) total += v;
+      if (total <= 0) continue;
+      double[] d = new double[daily.length];
+      double spread = 0;
+      for (int i = 0; i < daily.length; i++) {
+        double v = daily[i];
+        if (v > total * 0.4) { spread += v - total * 0.4; v = total * 0.4; }
+        d[i] = v;
+      }
+      for (int i = 0; i < d.length; i++) d[i] += spread / d.length;
+      double[] grid = new double[101];
+      double cum = 0;
+      double[] cumAt = new double[d.length + 1];
+      for (int i = 0; i < d.length; i++) { cum += d[i]; cumAt[i + 1] = cum / total; }
+      for (int g = 0; g <= 100; g++) {
+        double pos = g / 100.0 * d.length;
+        int i = (int) Math.floor(pos);
+        grid[g] = i >= d.length ? 1 : cumAt[i] + (cumAt[i + 1] - cumAt[i]) * (pos - i);
+      }
+      shapes.add(grid);
+    }
+    if (shapes.size() < 3) return null;
+    double[] out = new double[101];
+    double[] col = new double[shapes.size()];
+    for (int g = 0; g <= 100; g++) {
+      for (int c = 0; c < shapes.size(); c++) col[c] = shapes.get(c)[g];
+      java.util.Arrays.sort(col);
+      int n = col.length;
+      double med = n % 2 == 1 ? col[n / 2] : (col[n / 2 - 1] + col[n / 2]) / 2;
+      out[g] = med;
+    }
+    out[0] = 0;
+    for (int g = 1; g <= 100; g++) out[g] = Math.max(out[g - 1], Math.min(1, out[g]));
+    out[100] = 1;
+    return out;
   }
 
   // ---------------- Skor kesehatan ----------------
@@ -258,9 +332,9 @@ final class Analytics {
 
   /** Periode pembanding dengan panjang sama tepat sebelum [from, to]; untuk bulan penuh memakai jumlah bulan yang sama. */
   static String[] prevRange(String from, String to) {
-    if (from.endsWith("-01") && to.equals(Fmt.monthEnd(Fmt.period(to)))) {
-      int months = monthsBetween(Fmt.period(from), Fmt.period(to)) + 1;
-      return new String[]{Fmt.monthStart(Fmt.addMonths(Fmt.period(from), -months)), Fmt.addDays(from, -1)};
+    if (Fmt.wholeCycles(from, to)) {
+      int months = monthsBetween(Fmt.cycle(from), Fmt.cycle(to)) + 1;
+      return new String[]{Fmt.cycleStart(Fmt.addMonths(Fmt.cycle(from), -months)), Fmt.addDays(from, -1)};
     }
     int days = Fmt.daysBetween(from, to) + 1;
     return new String[]{Fmt.addDays(from, -days), Fmt.addDays(from, -1)};
@@ -286,13 +360,13 @@ final class Analytics {
     return out;
   }
 
-  /** Seri bulanan: [0]=pemasukan, [1]=pengeluaran untuk n bulan yang berakhir di endPeriod. */
+  /** Seri per siklus/bulan: [0]=pemasukan, [1]=pengeluaran untuk n siklus yang berakhir di endPeriod. */
   static long[][] monthly(List<Tx> all, String endPeriod, int n) {
     long[][] out = new long[2][n];
     String start = Fmt.addMonths(endPeriod, -(n - 1));
     for (Tx t : all) {
       if (t.type == Model.TRANSFER || t.date.length() < 7) continue;
-      int i = monthsBetween(start, Fmt.period(t.date));
+      int i = monthsBetween(start, Fmt.cycle(t.date));
       if (i < 0 || i >= n) continue;
       out[t.type == Model.INCOME ? 0 : 1][i] += t.amount;
     }

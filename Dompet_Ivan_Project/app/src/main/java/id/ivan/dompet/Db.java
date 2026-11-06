@@ -30,6 +30,7 @@ final class Db extends SQLiteOpenHelper {
     upgradeTo3(d);
     upgradeTo4(d);
     exec(d, Schema.V5);
+    exec(d, Schema.V6);
   }
 
   @Override public void onUpgrade(SQLiteDatabase d, int old, int now) {
@@ -37,18 +38,26 @@ final class Db extends SQLiteOpenHelper {
     if (old < 3) upgradeTo3(d);
     if (old < 4) upgradeTo4(d);
     if (old < 5) exec(d, Schema.V5);
+    if (old < 6) exec(d, Schema.V6);
   }
 
-  /** Mata uang aktif dibaca setiap kali database dibuka (juga dari alarm/notifikasi di latar belakang). */
-  @Override public void onOpen(SQLiteDatabase d) { applyCurrency(d); }
+  /**
+   * Mata uang dan awal siklus keuangan dibaca setiap kali database dibuka (juga dari alarm, widget, dan
+   * pembaca notifikasi di latar belakang).
+   */
+  @Override public void onOpen(SQLiteDatabase d) { applySettings(d); }
 
-  static void applyCurrency(SQLiteDatabase d) {
+  static void applySettings(SQLiteDatabase d) {
     Cursor c = d.rawQuery("SELECT value FROM settings WHERE key='currency'", null);
     try { Fmt.setCurrency(c.moveToFirst() ? c.getString(0) : "IDR"); } finally { c.close(); }
+    c = d.rawQuery("SELECT value FROM settings WHERE key='cycle_day'", null);
+    int day = 1;
+    try { if (c.moveToFirst()) day = Integer.parseInt(c.getString(0)); } catch (NumberFormatException ignored) {} finally { c.close(); }
+    Fmt.setCycleDay(day);
   }
 
-  /** Dipanggil setelah data diganti seluruhnya (pulihkan/reset). */
-  void reloaded() { iconCache.clear(); applyCurrency(getReadableDatabase()); }
+  /** Dipanggil setelah data diganti seluruhnya (pulihkan/reset) atau pengaturan siklus berubah. */
+  void reloaded() { iconCache.clear(); applySettings(getReadableDatabase()); }
 
   private static void exec(SQLiteDatabase d, String[] sql) { for (String s : sql) d.execSQL(s); }
 
@@ -255,7 +264,8 @@ final class Db extends SQLiteOpenHelper {
 
   ArrayList<Tx> range(String from, String to) { return query("date>=? AND date<=?", a(from, to), null); }
 
-  ArrayList<Tx> month(String period) { return range(Fmt.monthStart(period), Fmt.monthEnd(period)); }
+  /** Transaksi satu siklus keuangan (bulan kalender bila siklus mulai tgl 1). */
+  ArrayList<Tx> month(String period) { return range(Fmt.cycleStart(period), Fmt.cycleEnd(period)); }
 
   ArrayList<Tx> all() { return query(null, null, null); }
 
@@ -373,7 +383,7 @@ final class Db extends SQLiteOpenHelper {
   long spent(String from, String to) { return scalar("SELECT COALESCE(SUM(amount),0) FROM tx WHERE type=0 AND date>=? AND date<=?", from, to); }
 
   long spentCategory(String category, String period) {
-    return scalar("SELECT COALESCE(SUM(amount),0) FROM tx WHERE type=0 AND category=? AND date>=? AND date<=?", category, Fmt.monthStart(period), Fmt.monthEnd(period));
+    return scalar("SELECT COALESCE(SUM(amount),0) FROM tx WHERE type=0 AND category=? AND date>=? AND date<=?", category, Fmt.cycleStart(period), Fmt.cycleEnd(period));
   }
 
   ArrayList<Long> expenseAmounts(String from, String to) {
@@ -396,15 +406,15 @@ final class Db extends SQLiteOpenHelper {
     int months = 0;
     for (int i = 1; i <= 3; i++) {
       String p = Fmt.addMonths(currentPeriod, -i);
-      long s = spent(Fmt.monthStart(p), Fmt.monthEnd(p));
+      long s = spent(Fmt.cycleStart(p), Fmt.cycleEnd(p));
       if (s > 0) { total += s; months++; }
     }
     if (months == 0) {
       // Belum ada bulan penuh: perkirakan dari bulan berjalan.
       String today = Fmt.today();
-      long s = spent(Fmt.monthStart(currentPeriod), today);
-      int day = Fmt.day(today);
-      return s == 0 ? 0 : s * Fmt.daysInMonth(currentPeriod) / Math.max(1, day);
+      long s = spent(Fmt.cycleStart(currentPeriod), today);
+      int day = Fmt.cycleIndex(today);
+      return s == 0 ? 0 : s * Fmt.cycleDays(currentPeriod) / Math.max(1, day);
     }
     return total / months;
   }
@@ -422,17 +432,40 @@ final class Db extends SQLiteOpenHelper {
 
   // ---------------- Anggaran (amplop) ----------------
 
+  /** Amplop sebuah siklus. limit = batas efektif (termasuk sisa terbawa dari siklus sebelumnya bila rollover). */
   ArrayList<Budget> budgets(String period) {
+    ArrayList<Budget> out = rawBudgets(period);
+    for (Budget b : out) {
+      b.carry = b.rollover ? carry(b.category, period, 0) : 0;
+      b.limit = b.base + b.carry;
+    }
+    return out;
+  }
+
+  private ArrayList<Budget> rawBudgets(String period) {
     ArrayList<Budget> out = new ArrayList<>();
-    Cursor c = getReadableDatabase().query("budgets", new String[]{"period", "category", "lim"}, "period=?", a(period), null, null, "category");
+    Cursor c = getReadableDatabase().query("budgets", new String[]{"period", "category", "lim", "rollover"}, "period=?", a(period), null, null, "category");
     try {
       while (c.moveToNext()) {
         Budget b = new Budget();
-        b.period = c.getString(0); b.category = c.getString(1); b.limit = c.getLong(2);
+        b.period = c.getString(0); b.category = c.getString(1); b.base = c.getLong(2); b.limit = b.base; b.rollover = c.getInt(3) != 0;
         out.add(b);
       }
     } finally { c.close(); }
     return out;
+  }
+
+  /**
+   * Sisa amplop siklus sebelumnya yang terbawa ke `period`: batas efektif siklus lalu dikurangi pemakaiannya,
+   * hanya bila positif (kelebihan belanja tidak menjadi "utang amplop"). Rantai dihitung maks. 12 siklus ke belakang.
+   */
+  long carry(String cat, String period, int depth) {
+    String prev = Fmt.addMonths(period, -1);
+    Budget pb = null;
+    for (Budget x : rawBudgets(prev)) if (x.category.equals(cat)) pb = x;
+    if (pb == null) return 0;
+    long prevCarry = pb.rollover && depth < 12 ? carry(cat, prev, depth + 1) : 0;
+    return Math.max(0, pb.base + prevCarry - spentCategory(cat, prev));
   }
 
   Budget budget(String period, String cat) {
@@ -440,9 +473,9 @@ final class Db extends SQLiteOpenHelper {
     return null;
   }
 
-  void putBudget(String period, String cat, long limit) {
+  void putBudget(String period, String cat, long limit, boolean rollover) {
     ContentValues v = new ContentValues();
-    v.put("period", period); v.put("category", cat); v.put("lim", limit);
+    v.put("period", period); v.put("category", cat); v.put("lim", limit); v.put("rollover", rollover ? 1 : 0);
     getWritableDatabase().insertWithOnConflict("budgets", null, v, SQLiteDatabase.CONFLICT_REPLACE);
   }
 
@@ -450,7 +483,7 @@ final class Db extends SQLiteOpenHelper {
 
   int copyBudgets(String from, String to) {
     int n = 0;
-    for (Budget b : budgets(from)) if (budget(to, b.category) == null) { putBudget(to, b.category, b.limit); n++; }
+    for (Budget b : rawBudgets(from)) if (budget(to, b.category) == null) { putBudget(to, b.category, b.base, b.rollover); n++; }
     return n;
   }
 
@@ -513,20 +546,34 @@ final class Db extends SQLiteOpenHelper {
 
   ArrayList<Goal> goals() {
     ArrayList<Goal> out = new ArrayList<>();
-    Cursor c = getReadableDatabase().rawQuery("SELECT g.id,g.name,g.target,g.deadline,COALESCE((SELECT SUM(amount) FROM contributions WHERE goal_id=g.id),0) FROM goals g ORDER BY g.id DESC", null);
+    Cursor c = getReadableDatabase().rawQuery("SELECT g.id,g.name,g.target,g.deadline,COALESCE((SELECT SUM(amount) FROM contributions WHERE goal_id=g.id),0),g.account FROM goals g ORDER BY g.id DESC", null);
+    HashMap<Long, Long> bal = null;
     try {
       while (c.moveToNext()) {
         Goal g = new Goal();
-        g.id = c.getLong(0); g.name = c.getString(1); g.target = c.getLong(2); g.deadline = c.getString(3); g.saved = c.getLong(4);
+        g.id = c.getLong(0); g.name = c.getString(1); g.target = c.getLong(2); g.deadline = c.getString(3); g.saved = c.getLong(4); g.account = c.getLong(5);
+        if (g.account > 0) {
+          if (bal == null) { bal = new HashMap<>(); for (Account x : accounts(true)) bal.put(x.id, x.balance); }
+          Long b = bal.get(g.account);
+          if (b == null) g.account = 0; else g.saved = Math.max(0, b);
+        }
         out.add(g);
       }
     } finally { c.close(); }
     return out;
   }
 
-  void putGoal(long id, String name, long target, String deadline) {
+  /** Id akun yang sudah ditautkan ke target lain (satu akun = satu target). */
+  HashSet<Long> linkedAccounts(long exceptGoal) {
+    HashSet<Long> out = new HashSet<>();
+    Cursor c = getReadableDatabase().rawQuery("SELECT account FROM goals WHERE account>0 AND id<>?", a(exceptGoal));
+    try { while (c.moveToNext()) out.add(c.getLong(0)); } finally { c.close(); }
+    return out;
+  }
+
+  void putGoal(long id, String name, long target, String deadline, long account) {
     ContentValues v = new ContentValues();
-    v.put("name", name); v.put("target", target); v.put("deadline", deadline == null ? "" : deadline);
+    v.put("name", name); v.put("target", target); v.put("deadline", deadline == null ? "" : deadline); v.put("account", Math.max(0, account));
     if (id == 0) getWritableDatabase().insertOrThrow("goals", null, v);
     else getWritableDatabase().update("goals", v, "id=?", a(id));
   }
@@ -543,7 +590,16 @@ final class Db extends SQLiteOpenHelper {
 
   long saved(long goal) { return scalar("SELECT COALESCE(SUM(amount),0) FROM contributions WHERE goal_id=?", a(goal)); }
 
-  long totalSaved() { return scalar("SELECT COALESCE(SUM(amount),0) FROM contributions"); }
+  /**
+   * Uang yang disisihkan untuk target: alokasi target biasa + saldo positif akun yang ditautkan ke target (5.0).
+   * Dikurangkan dari total saldo untuk mendapat "saldo tersedia".
+   */
+  long totalSaved() {
+    long s = scalar("SELECT COALESCE(SUM(c.amount),0) FROM contributions c JOIN goals g ON g.id=c.goal_id WHERE g.account=0");
+    HashSet<Long> linked = linkedAccounts(0);
+    if (!linked.isEmpty()) for (Account x : accounts(true)) if (linked.contains(x.id)) s += Math.max(0, x.balance);
+    return s;
+  }
 
   void contribute(long goal, long amount) {
     ContentValues v = new ContentValues();
@@ -571,6 +627,25 @@ final class Db extends SQLiteOpenHelper {
     ContentValues v = new ContentValues();
     v.put("name", name); v.put("type", t.type); v.put("amount", t.amount); v.put("category", t.cat); v.put("note", t.note); v.put("account", t.account);
     getWritableDatabase().insertOrThrow("templates", null, v);
+  }
+
+  /** Template yang paling sering terpakai 60 hari terakhir (transaksi berjenis, kategori, dan nominal sama). */
+  ArrayList<Template> topTemplates(int n) {
+    ArrayList<Template> all = templates();
+    final HashMap<Long, Long> uses = new HashMap<>();
+    String since = Fmt.addDays(Fmt.today(), -60);
+    for (Template t : all)
+      uses.put(t.id, scalar("SELECT COUNT(*) FROM tx WHERE type=? AND category=? AND amount=? AND date>=?", a(t.type, t.cat, t.amount, since)));
+    java.util.Collections.sort(all, new java.util.Comparator<Template>() {
+      public int compare(Template x, Template y) { int c = Long.compare(uses.get(y.id), uses.get(x.id)); return c != 0 ? c : Long.compare(y.id, x.id); }
+    });
+    while (all.size() > n) all.remove(all.size() - 1);
+    return all;
+  }
+
+  Template template(long id) {
+    for (Template t : templates()) if (t.id == id) return t;
+    return null;
   }
 
   void deleteTemplate(long id) { getWritableDatabase().delete("templates", "id=?", a(id)); }
@@ -675,10 +750,74 @@ final class Db extends SQLiteOpenHelper {
     getWritableDatabase().insertWithOnConflict("settings", null, v, SQLiteDatabase.CONFLICT_REPLACE);
   }
 
+  // ---------------- Kotak saran: notifikasi & impor (5.0) ----------------
+
+  static final class Suggestion { long id, amount; int type, status; String created = "", date = "", source = "", note = "", raw = "", fp = ""; }
+
+  /** Menambah saran; -1 bila saran dengan sidik jari sama sudah ada (notifikasi yang diposting ulang). */
+  long addInbox(Suggestion x) {
+    if (scalar("SELECT COUNT(*) FROM inbox WHERE fp=?", x.fp) > 0) return -1;
+    ContentValues v = new ContentValues();
+    v.put("created", Fmt.today()); v.put("date", x.date); v.put("source", x.source); v.put("type", x.type); v.put("amount", x.amount);
+    v.put("note", x.note.length() > 160 ? x.note.substring(0, 160) : x.note);
+    v.put("raw", x.raw.length() > 300 ? x.raw.substring(0, 300) : x.raw);
+    v.put("fp", x.fp.length() > 80 ? x.fp.substring(0, 80) : x.fp); v.put("status", 0);
+    return getWritableDatabase().insertOrThrow("inbox", null, v);
+  }
+
+  ArrayList<Suggestion> inbox() {
+    ArrayList<Suggestion> out = new ArrayList<>();
+    Cursor c = getReadableDatabase().query("inbox", new String[]{"id", "created", "date", "source", "type", "amount", "note", "raw", "fp", "status"}, "status=0", null, null, null, "date DESC,id DESC", "200");
+    try {
+      while (c.moveToNext()) {
+        Suggestion x = new Suggestion();
+        x.id = c.getLong(0); x.created = c.getString(1); x.date = c.getString(2); x.source = c.getString(3); x.type = c.getInt(4);
+        x.amount = c.getLong(5); x.note = c.getString(6); x.raw = c.getString(7); x.fp = c.getString(8); x.status = c.getInt(9);
+        out.add(x);
+      }
+    } finally { c.close(); }
+    return out;
+  }
+
+  long inboxCount() { return scalar("SELECT COUNT(*) FROM inbox WHERE status=0"); }
+
+  /** status 1 = dicatat, 2 = diabaikan. */
+  void setInboxStatus(long id, int status) {
+    ContentValues v = new ContentValues();
+    v.put("status", status);
+    v.put("raw", ""); // teks asli notifikasi tidak disimpan lagi setelah ditangani
+    getWritableDatabase().update("inbox", v, "id=?", a(id));
+  }
+
+  /** Saran yang sudah ditangani dihapus setelah 30 hari, yang belum ditangani setelah 60 hari. */
+  void purgeInbox() {
+    getWritableDatabase().delete("inbox", "(status<>0 AND created<?) OR created<?", a(Fmt.addDays(Fmt.today(), -30), Fmt.addDays(Fmt.today(), -60)));
+  }
+
+  /** Kemungkinan sudah dicatat: transaksi berjenis & bernominal sama dalam ±1 hari. */
+  boolean likelyRecorded(int type, long amount, String date) {
+    return scalar("SELECT COUNT(*) FROM tx WHERE type=? AND amount=? AND date>=? AND date<=?", a(type, amount, Fmt.addDays(date, -1), Fmt.addDays(date, 1))) > 0;
+  }
+
+  /** Transaksi berjenis, bernominal, dan bertanggal sama persis sudah ada (deteksi duplikat impor). */
+  boolean hasTx(int type, long amount, String date) {
+    return scalar("SELECT COUNT(*) FROM tx WHERE type=? AND amount=? AND date=?", a(type, amount, date)) > 0;
+  }
+
+  /** Kategori yang paling sering dipakai untuk catatan berisi kata kunci dari teks (mis. nama merchant); "" bila tidak ada. */
+  String guessCategory(int type, String text) {
+    if (type == Model.TRANSFER || text == null) return "";
+    for (String w : CsvImport.keywords(text)) {
+      Cursor c = getReadableDatabase().rawQuery("SELECT category, COUNT(*) n FROM tx WHERE type=? AND note LIKE ? GROUP BY category ORDER BY n DESC LIMIT 1", a(type, "%" + w + "%"));
+      try { if (c.moveToFirst()) return c.getString(0); } finally { c.close(); }
+    }
+    return "";
+  }
+
   // ---------------- Reset & mata uang (4.0) ----------------
 
   /** Tabel yang dikosongkan saat reset keuangan (urutan tidak penting; semua dalam satu transaksi). */
-  static final String[] DATA_TABLES = {"tx", "trash", "budgets", "bills", "goals", "contributions", "debts", "wishes"};
+  static final String[] DATA_TABLES = {"tx", "trash", "budgets", "bills", "goals", "contributions", "debts", "wishes", "inbox"};
   static final String[] STRUCTURE_TABLES = {"categories", "templates", "accounts"};
 
   /**
@@ -687,20 +826,21 @@ final class Db extends SQLiteOpenHelper {
    * dipertahankan; mata uang dan daftar akun/kategori/template hanya bila diminta.
    */
   void resetAll(boolean keepStructure, boolean keepCurrency) {
-    String name = setting("name", ""), currency = setting("currency", "IDR");
+    String name = setting("name", ""), currency = setting("currency", "IDR"), cycle = setting("cycle_day", "");
     SQLiteDatabase d = getWritableDatabase();
     d.beginTransaction();
     try {
       for (String t : DATA_TABLES) d.delete(t, null, null);
       d.delete("settings", null, null);
       if (!keepStructure) for (String t : STRUCTURE_TABLES) d.delete(t, null, null);
-      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','trash','bills','goals','contributions','debts','wishes')");
+      d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('tx','trash','bills','goals','contributions','debts','wishes','inbox')");
       if (!keepStructure) d.execSQL("DELETE FROM sqlite_sequence WHERE name IN ('templates','accounts')");
       d.execSQL("INSERT OR IGNORE INTO accounts(id,name,icon,color,archived) VALUES(1,'Dompet utama','👛',0,0)");
       if (keepStructure) { ContentValues v = new ContentValues(); v.put("archived", 0); d.update("accounts", v, "id=1", null); }
       seedCategories(d);
       seedIcons(d);
       if (!name.isEmpty()) { ContentValues v = new ContentValues(); v.put("key", "name"); v.put("value", name); d.insert("settings", null, v); }
+      if (!cycle.isEmpty()) { ContentValues v = new ContentValues(); v.put("key", "cycle_day"); v.put("value", cycle); d.insert("settings", null, v); }
       if (keepCurrency && !currency.equals("IDR")) { ContentValues v = new ContentValues(); v.put("key", "currency"); v.put("value", currency); d.insert("settings", null, v); }
       d.setTransactionSuccessful();
     } finally { d.endTransaction(); }
@@ -710,11 +850,12 @@ final class Db extends SQLiteOpenHelper {
   /** Kolom nominal per tabel yang ikut dikonversi saat mata uang diganti. */
   static final String[][] MONEY_COLUMNS = {
     {"tx", "amount"}, {"trash", "amount"}, {"budgets", "lim"}, {"bills", "amount"}, {"goals", "target"},
-    {"contributions", "amount"}, {"templates", "amount"}, {"debts", "amount"}, {"debts", "paid"}, {"wishes", "price"}
+    {"contributions", "amount"}, {"templates", "amount"}, {"debts", "amount"}, {"debts", "paid"}, {"wishes", "price"},
+    {"inbox", "amount"}
   };
 
   /** Pengaturan bernilai nominal (batas kontrol). Skenario simulasi dikonversi terpisah. */
-  static final String[] MONEY_SETTINGS = {"limit_month", "limit_week", "limit_day", "unusual_min"};
+  static final String[] MONEY_SETTINGS = {"limit_month", "limit_week", "limit_day", "unusual_min", "safe_buffer"};
 
   /**
    * Mengganti mata uang. rate = nilai 1 unit mata uang lama dalam mata uang baru (1 untuk "hanya ganti

@@ -8,8 +8,8 @@ package id.ivan.dompet;
 final class Schema {
   private Schema() {}
 
-  static final int DB_VERSION = 5;
-  static final int BACKUP_SCHEMA = 5;
+  static final int DB_VERSION = 6;
+  static final int BACKUP_SCHEMA = 6;
 
   /** Versi 1 (Dompet 1.x). */
   static final String[] V1 = {
@@ -52,6 +52,17 @@ final class Schema {
   static final String[] V5 = {
     "ALTER TABLE bills ADD COLUMN freq INTEGER NOT NULL DEFAULT 0",
     "CREATE TABLE trash(id INTEGER PRIMARY KEY AUTOINCREMENT,deleted TEXT NOT NULL,date TEXT NOT NULL,type INTEGER NOT NULL,amount INTEGER NOT NULL,category TEXT NOT NULL,note TEXT NOT NULL,account INTEGER NOT NULL DEFAULT 1,to_account INTEGER NOT NULL DEFAULT 0)"
+  };
+
+  /**
+   * Versi 6 (Dompet Ivan 5.0): target tertaut akun, amplop dengan sisa terbawa, dan kotak saran transaksi
+   * (dari notifikasi bank/e-wallet atau impor CSV) yang menunggu konfirmasi.
+   */
+  static final String[] V6 = {
+    "ALTER TABLE goals ADD COLUMN account INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE budgets ADD COLUMN rollover INTEGER NOT NULL DEFAULT 0",
+    "CREATE TABLE inbox(id INTEGER PRIMARY KEY AUTOINCREMENT,created TEXT NOT NULL,date TEXT NOT NULL,source TEXT NOT NULL,type INTEGER NOT NULL,amount INTEGER NOT NULL,note TEXT NOT NULL,raw TEXT NOT NULL DEFAULT '',fp TEXT NOT NULL,status INTEGER NOT NULL DEFAULT 0)",
+    "CREATE INDEX idx_inbox_fp ON inbox(fp)"
   };
 
   static final String[] EXP = {"Makan & minum", "Transportasi", "Belanja", "Tagihan", "Kesehatan", "Pendidikan", "Hiburan", "Lainnya"};
