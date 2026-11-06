@@ -42,6 +42,7 @@ final class Home {
     long total = db.total(), reserved = db.totalSaved();
 
     hero(body, total, reserved, inc, exp);
+    inboxCard(body);
     if (period.equals(Fmt.cycle(today))) a.projection.safeCard(body);
     accounts(body);
     controlStatus(body, period, today);
@@ -101,6 +102,24 @@ final class Home {
     long bal = total;
     for (int i = n - 1; i >= 0; i--) { out[i] = bal; bal -= net[i]; }
     return out;
+  }
+
+  /** Kartu kotak saran (5.0): saran transaksi dari notifikasi yang menunggu konfirmasi. */
+  private void inboxCard(LinearLayout body) {
+    long n = db.inboxCount();
+    if (n == 0) return;
+    LinearLayout c = ui.card(body);
+    c.setBackground(ui.round(ui.soft(ui.blue), 22));
+    LinearLayout r = ui.row();
+    r.addView(ui.badge("📥", "S", ui.blue, 42));
+    ui.hgap(r, 12);
+    LinearLayout t = ui.col();
+    t.addView(ui.label(n + " saran transaksi menunggu", 14.5f, ui.text));
+    t.addView(ui.text("Dari notifikasi bank/e-wallet · ketuk untuk memeriksa", 12, ui.muted));
+    r.addView(t, Ui.weight(1));
+    r.addView(ui.text("›", 22, ui.faint));
+    c.addView(r);
+    ui.click(c, new Runnable() { public void run() { a.tools.inbox(); } });
   }
 
   private void accounts(LinearLayout body) {

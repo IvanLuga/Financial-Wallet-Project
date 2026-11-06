@@ -58,8 +58,15 @@ final class Forms {
 
   // ======================= Formulir transaksi =======================
 
+  private Runnable pendingSaved;
+
+  /** Seperti tx(init), lalu menjalankan onSaved setelah transaksi tersimpan (mis. menandai saran sebagai dicatat). */
+  void tx(Tx init, Runnable onSaved) { pendingSaved = onSaved; tx(init); }
+
   /** @param init null = transaksi baru; id 0 = isian awal (template/duplikat); id > 0 = ubah transaksi. */
   void tx(Tx init) {
+    final Runnable savedHook = pendingSaved;
+    pendingSaved = null;
     final boolean existing = init != null && init.id > 0;
     final Tx t = init == null ? new Tx() : init.copy();
     if (init == null) {
@@ -334,6 +341,7 @@ final class Forms {
         } finally { w.endTransaction(); }
         if (t.type != Model.TRANSFER) db.set("default_account", t.account);
         s.dismiss();
+        if (savedHook != null) savedHook.run();
         a.afterSave(t, !existing);
       }
     });

@@ -44,11 +44,12 @@ public class ReminderReceiver extends BroadcastReceiver {
     if (MORNING.equals(action) || EVENING.equals(action)) {
       Db db = new Db(c);
       try {
-        if (MORNING.equals(action)) Control.morning(c, db); else Control.evening(c, db);
+        if (MORNING.equals(action)) { Control.morning(c, db); AutoBackup.runIfDue(c, db); } else Control.evening(c, db);
       } catch (Exception ignored) {
         // Pengecekan gagal tidak boleh membuat aplikasi crash; dicoba lagi besok.
       } finally { db.close(); }
     }
+    SaldoWidget.refresh(c);
     schedule(c); // BOOT_COMPLETED, MY_PACKAGE_REPLACED, dan alarm berikutnya.
   }
 }

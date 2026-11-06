@@ -629,6 +629,25 @@ final class Db extends SQLiteOpenHelper {
     getWritableDatabase().insertOrThrow("templates", null, v);
   }
 
+  /** Template yang paling sering terpakai 60 hari terakhir (transaksi berjenis, kategori, dan nominal sama). */
+  ArrayList<Template> topTemplates(int n) {
+    ArrayList<Template> all = templates();
+    final HashMap<Long, Long> uses = new HashMap<>();
+    String since = Fmt.addDays(Fmt.today(), -60);
+    for (Template t : all)
+      uses.put(t.id, scalar("SELECT COUNT(*) FROM tx WHERE type=? AND category=? AND amount=? AND date>=?", a(t.type, t.cat, t.amount, since)));
+    java.util.Collections.sort(all, new java.util.Comparator<Template>() {
+      public int compare(Template x, Template y) { int c = Long.compare(uses.get(y.id), uses.get(x.id)); return c != 0 ? c : Long.compare(y.id, x.id); }
+    });
+    while (all.size() > n) all.remove(all.size() - 1);
+    return all;
+  }
+
+  Template template(long id) {
+    for (Template t : templates()) if (t.id == id) return t;
+    return null;
+  }
+
   void deleteTemplate(long id) { getWritableDatabase().delete("templates", "id=?", a(id)); }
 
   // ---------------- Utang & piutang ----------------
@@ -729,6 +748,70 @@ final class Db extends SQLiteOpenHelper {
     v.put("key", key);
     v.put("value", value instanceof Boolean ? (((Boolean) value) ? "1" : "0") : String.valueOf(value));
     getWritableDatabase().insertWithOnConflict("settings", null, v, SQLiteDatabase.CONFLICT_REPLACE);
+  }
+
+  // ---------------- Kotak saran: notifikasi & impor (5.0) ----------------
+
+  static final class Suggestion { long id, amount; int type, status; String created = "", date = "", source = "", note = "", raw = "", fp = ""; }
+
+  /** Menambah saran; -1 bila saran dengan sidik jari sama sudah ada (notifikasi yang diposting ulang). */
+  long addInbox(Suggestion x) {
+    if (scalar("SELECT COUNT(*) FROM inbox WHERE fp=?", x.fp) > 0) return -1;
+    ContentValues v = new ContentValues();
+    v.put("created", Fmt.today()); v.put("date", x.date); v.put("source", x.source); v.put("type", x.type); v.put("amount", x.amount);
+    v.put("note", x.note.length() > 160 ? x.note.substring(0, 160) : x.note);
+    v.put("raw", x.raw.length() > 300 ? x.raw.substring(0, 300) : x.raw);
+    v.put("fp", x.fp.length() > 80 ? x.fp.substring(0, 80) : x.fp); v.put("status", 0);
+    return getWritableDatabase().insertOrThrow("inbox", null, v);
+  }
+
+  ArrayList<Suggestion> inbox() {
+    ArrayList<Suggestion> out = new ArrayList<>();
+    Cursor c = getReadableDatabase().query("inbox", new String[]{"id", "created", "date", "source", "type", "amount", "note", "raw", "fp", "status"}, "status=0", null, null, null, "date DESC,id DESC", "200");
+    try {
+      while (c.moveToNext()) {
+        Suggestion x = new Suggestion();
+        x.id = c.getLong(0); x.created = c.getString(1); x.date = c.getString(2); x.source = c.getString(3); x.type = c.getInt(4);
+        x.amount = c.getLong(5); x.note = c.getString(6); x.raw = c.getString(7); x.fp = c.getString(8); x.status = c.getInt(9);
+        out.add(x);
+      }
+    } finally { c.close(); }
+    return out;
+  }
+
+  long inboxCount() { return scalar("SELECT COUNT(*) FROM inbox WHERE status=0"); }
+
+  /** status 1 = dicatat, 2 = diabaikan. */
+  void setInboxStatus(long id, int status) {
+    ContentValues v = new ContentValues();
+    v.put("status", status);
+    v.put("raw", ""); // teks asli notifikasi tidak disimpan lagi setelah ditangani
+    getWritableDatabase().update("inbox", v, "id=?", a(id));
+  }
+
+  /** Saran yang sudah ditangani dihapus setelah 30 hari, yang belum ditangani setelah 60 hari. */
+  void purgeInbox() {
+    getWritableDatabase().delete("inbox", "(status<>0 AND created<?) OR created<?", a(Fmt.addDays(Fmt.today(), -30), Fmt.addDays(Fmt.today(), -60)));
+  }
+
+  /** Kemungkinan sudah dicatat: transaksi berjenis & bernominal sama dalam ±1 hari. */
+  boolean likelyRecorded(int type, long amount, String date) {
+    return scalar("SELECT COUNT(*) FROM tx WHERE type=? AND amount=? AND date>=? AND date<=?", a(type, amount, Fmt.addDays(date, -1), Fmt.addDays(date, 1))) > 0;
+  }
+
+  /** Transaksi berjenis, bernominal, dan bertanggal sama persis sudah ada (deteksi duplikat impor). */
+  boolean hasTx(int type, long amount, String date) {
+    return scalar("SELECT COUNT(*) FROM tx WHERE type=? AND amount=? AND date=?", a(type, amount, date)) > 0;
+  }
+
+  /** Kategori yang paling sering dipakai untuk catatan berisi kata kunci dari teks (mis. nama merchant); "" bila tidak ada. */
+  String guessCategory(int type, String text) {
+    if (type == Model.TRANSFER || text == null) return "";
+    for (String w : CsvImport.keywords(text)) {
+      Cursor c = getReadableDatabase().rawQuery("SELECT category, COUNT(*) n FROM tx WHERE type=? AND note LIKE ? GROUP BY category ORDER BY n DESC LIMIT 1", a(type, "%" + w + "%"));
+      try { if (c.moveToFirst()) return c.getString(0); } finally { c.close(); }
+    }
+    return "";
   }
 
   // ---------------- Reset & mata uang (4.0) ----------------

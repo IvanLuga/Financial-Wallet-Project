@@ -166,7 +166,7 @@ final class Backup {
             long id = o.getLong("id"), amount = o.getLong("amount");
             int type = o.getInt("type"), status = o.optInt("status", 0);
             String created = o.getString("created"), date = o.getString("date"), source = o.getString("source"), note = o.optString("note", ""), raw = o.optString("raw", ""), fp = o.getString("fp");
-            check(id > 0 && amountOk(amount) && (type == 0 || type == 1) && status >= 0 && status <= 2 && Fmt.validIso(created) && Fmt.validIso(date)
+            check(id > 0 && amountOk(amount) && type >= 0 && type <= 2 && status >= 0 && status <= 2 && Fmt.validIso(created) && Fmt.validIso(date)
               && text(source, 40, false) && text(note, 160, true) && text(raw, 300, true) && text(fp, 80, false), "Kotak saran");
             v.put("id", id); v.put("created", created); v.put("date", date); v.put("source", source); v.put("type", type);
             v.put("amount", amount); v.put("note", note); v.put("raw", raw); v.put("fp", fp); v.put("status", status);

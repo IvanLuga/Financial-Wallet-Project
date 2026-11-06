@@ -124,7 +124,7 @@ final class Projection {
    * compute(db, false) yang di-cache selama data tidak berubah (total_changes() koneksi ini), hari, mata uang,
    * dan siklus sama — dipakai beranda, kontrol, dan pengecekan notifikasi agar tidak dihitung ulang berkali-kali.
    */
-  static Ctx light(Db db) {
+  static synchronized Ctx light(Db db) {
     String key = System.identityHashCode(db) + "|" + Fmt.today() + "|" + db.scalar("SELECT total_changes()") + "|" + Fmt.cur.code + "|" + Fmt.cycleDay;
     if (lightCache != null && key.equals(lightKey)) return lightCache;
     lightCache = compute(db, false);
