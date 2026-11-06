@@ -35,8 +35,8 @@ import java.util.Calendar;
 
 /** Kerangka aplikasi: header, navigasi bawah, tema, kunci PIN, menu pengaturan, dan ekspor/impor berkas. */
 public class MainActivity extends Activity {
-  static final String APP_NAME = "Dompet Ivan v4.0", VERSION = "4.0";
-  static final int VERSION_CODE = 6;
+  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0";
+  static final int VERSION_CODE = 7;
   static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_PNG = 7, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
@@ -142,10 +142,10 @@ public class MainActivity extends Activity {
       new Thread(new Runnable() { public void run() { AutoBackup.runIfDue(app, db); } }).start();
     }
     if (prefs.getBoolean("welcome_fresh", false)) {
-      prefs.edit().putBoolean("welcome_fresh", false).putBoolean("seen_v40", true).apply();
+      prefs.edit().putBoolean("welcome_fresh", false).putBoolean("seen_v50", true).putBoolean("seen_v40", true).apply();
       handler.postDelayed(new Runnable() { public void run() { forms.welcome(true); } }, 450);
-    } else if (!prefs.getBoolean("seen_v40", false)) {
-      prefs.edit().putBoolean("seen_v40", true).putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
+    } else if (!prefs.getBoolean("seen_v50", false)) {
+      prefs.edit().putBoolean("seen_v50", true).putBoolean("seen_v40", true).putBoolean("seen_v35", true).putBoolean("seen_v3", true).apply();
       handler.postDelayed(new Runnable() { public void run() { forms.welcome(db.txCount() == 0); } }, 450);
     }
   }

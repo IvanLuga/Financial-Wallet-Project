@@ -9,11 +9,11 @@ cd "$(dirname "$0")"
 : "${KEY_PASSWORD:?Set KEY_PASSWORD, mis. KEY_PASSWORD=\"\$(cat signing-password.txt)\"}"
 ANDROID_JAR="${ANDROID_JAR:-/usr/lib/android-sdk/platforms/android-23/android.jar}"
 DX="${DX:-dalvik-exchange}"
-OUT="${OUT:-Dompet_Ivan_v4.0.apk}"
+OUT="${OUT:-Dompet_Ivan_v5.0.apk}"
 rm -rf build && mkdir -p build/gen build/classes build/res
 aapt2 compile --dir app/src/main/res -o build/res/res.zip
 aapt2 link -o build/unsigned.apk -I "$ANDROID_JAR" --manifest app/src/main/AndroidManifest.xml \
-  --java build/gen --min-sdk-version 23 --target-sdk-version 34 --version-code 6 --version-name 4.0 build/res/res.zip
+  --java build/gen --min-sdk-version 23 --target-sdk-version 34 --version-code 7 --version-name 5.0 build/res/res.zip
 javac -encoding UTF-8 -source 8 -target 8 -Xlint:-options -Xlint:deprecation -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" \
   -d build/classes $(find build/gen app/src/main/java -name '*.java')
 "$DX" --dex --min-sdk-version=23 --output=build/classes.dex build/classes

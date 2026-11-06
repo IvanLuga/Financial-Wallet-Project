@@ -1,19 +1,45 @@
-# Dompet Ivan v4.0 — offline Android wallet
+# Dompet Ivan v5.0 — offline Android wallet
 
-An update to Dompet 3.5. Requires Android 6.0 or newer. No account, ads, server, or internet permission; all data stays on the phone.
+An update to Dompet Ivan 4.0. Requires Android 6.0 or newer. No account, ads, server, or internet permission; all data stays on the phone.
 
 The app's interface is in Indonesian. In this document, in-app labels are shown in **bold Indonesian** with an English translation in parentheses where helpful.
 
-Home-screen name: **Dompet Ivan** (short enough not to be cut off). Inside the app, in PDFs, and in backups: **Dompet Ivan v4.0**.
+Home-screen name: **Dompet Ivan** (short enough not to be cut off). Inside the app, in PDFs, and in backups: **Dompet Ivan v5.0**.
 
-## Installing the update (3.x → 4.0)
+## Installing the update (3.x / 4.0 → 5.0)
 
 1. In the old app, open the `•••` menu → **Cadangkan data (JSON)** (Back up data). Keep a copy somewhere off the phone as well.
-2. Open `Dompet_Ivan_v4.0.apk` and choose **Update**. **Do not uninstall the old app**, because that also deletes its local data.
-3. The package is still `id.ivan.dompet` and the signing certificate is the same as v1–3.5 (SHA-256 `4d:b3:85:79…7f:6d:8e`). The version code goes up to **6**. The database is migrated automatically from schema 4 to **schema 5** (a bill-cycle column plus a trash table); all existing data stays intact and existing bills stay monthly.
+2. Open `Dompet_Ivan_v5.0.apk` and choose **Update**. **Do not uninstall the old app**, because that also deletes its local data.
+3. The package is still `id.ivan.dompet` and the signing certificate is the same as v1–4.0 (SHA-256 `4d:b3:85:79…7f:6d:8e`). The version code goes up to **7**. The database is migrated automatically to **schema 6** (from 4.0: goal-account link, envelope rollover flag, and a suggestion inbox table; from 3.x: also the bill-cycle column and the trash table). All existing data stays intact; goals stay unlinked, envelopes don't roll over, bills keep their cycle, and months stay calendar months until you change them.
 4. On first launch, a summary of the new features is shown.
 
-## What's new in 4.0
+## What's new in 5.0
+
+### 1. Smarter money rules
+- **Month starts on your payday** (`•••` menu → **Awal bulan keuangan**): choose any day from 1 to 28. Reports, limits, envelopes, the no-spend challenge, the calendar, "safe to spend", and the end-of-month forecast all follow your pay cycle. A cycle is named after the month that holds most of its days: starting on the 25th, "November" = 25 Oct – 24 Nov. The default (day 1) keeps normal calendar months, so nothing changes unless you set it.
+- **Safe to spend today** (new card at the top of Home): the highest steady daily spending that keeps your available balance above a minimum buffer on every day until the end of the cycle. It accounts for scheduled bills, installments, debts and detected recurring payments, counts scheduled income only from the day it arrives (salary on the 25th can't be spent on the 10th), sets aside the monthly amount your dated savings goals need, and never exceeds what's left of your monthly limit after scheduled bills. Tap it for the full breakdown and to change the buffer (default Rp100k). It also replaces the automatic daily allowance in the Control tab and in evening notifications.
+- **Personal spending path**: the "ideal" line in the spending-pace chart (and the Safe / Caution / Overspending status) is now built from the median shape of your last 6 cycles, instead of a straight line. If rent and groceries always land early in the month, the app no longer says you're overspending on day 3. Needs at least 3 cycles of data; can be switched back to a straight line.
+- **Goals linked to an account**: a savings goal can use a real account (for example "Tabungan BCA"). Its progress is that account's balance, the balance no longer counts as free money, and deposits/withdrawals are recorded as transfers.
+- **Financial independence multiple is adjustable** (`•••` → **Asumsi proyeksi**), default now **30×** annual spending (≈3.3% withdrawal per year). The old 25× comes from the 4% rule, which is based on US market data; with Indonesia's higher inflation, 30–33× is safer.
+- **Envelope rollover**: each envelope can carry its positive leftover into the next cycle (overspending does not become "envelope debt").
+
+### 2. Less typing
+- **Suggestions from notifications** (`•••` → **Saran dari notifikasi**): after you grant Android's "Notification access", payment notifications from the banking/e-wallet apps you tick (GoPay, OVO, DANA, ShopeePay, LinkAja, BCA, BRImo, Livin', BNI, Jago, SeaBank, Jenius, and more) become suggestions in an inbox. Nothing is recorded until you confirm it in the transaction form (category is guessed from your history). OTP codes, promos, failed payments and bill reminders are ignored. Other apps that send money notifications are listed as "detected" so you can enable them. Text is processed on the phone only; the app still has no internet permission, and the original text is deleted once a suggestion is handled. There's a **test box** to paste a notification and see how it's read.
+- **Home-screen widget** ("Dompet Ivan"): available balance, today's safe-to-spend amount, and your 3 most-used templates. Tapping a template records it for today straight away, with an **Undo** notification. Amounts are hidden on the widget when a PIN is set, unless you allow them.
+- **Import bank statements (CSV)** (`•••` → **Impor mutasi (CSV)**): reads common formats: amount with DB/CR (e.g. BCA, including dates without a year), separate debit and credit columns, signed amounts (e-wallet exports), and Dompet's own CSV export. A preview shows totals, flags likely duplicates (same date, type and amount; skipped by default), lets you include/exclude rows and change categories, and imports into the account you pick. Transfers between accounts are skipped.
+- **Automatic backup** (`•••` → **Cadangan otomatis**): daily, weekly or monthly JSON backups to a folder you choose, keeping the newest 3/5/10/20 files. Optionally **password-protected** (AES-256-GCM, key from PBKDF2). Restoring a protected file asks for the password.
+
+### 3. New insights (Insights tab)
+- **Personal inflation**: compares what you used to pay and what you pay now for things you buy often (same category + note, at least 4 purchases over at least 4 months, median prices so the odd double purchase doesn't count), e.g. "Kopi susu: Rp18,000 → Rp23,000 (+28%)". A spending-weighted yearly index is compared with your inflation assumption (not official BPS data, since the app is offline).
+- **Subscription audit**: bills of type "Langganan" plus recurring payments that look like subscriptions (Netflix, Spotify, iCloud, YouTube, Canva, gym, and so on), with the yearly total. Every 90 days it asks "still using it?" (once-a-month reminder, can be turned off). Marking one as stopped removes the bill and shows how much you save per year.
+- **Weekly & monthly report ("Dompet Wrapped")**: a badge (e.g. "Penabung andal" / Great saver, "Makin hemat" / Spending less), biggest categories, and fun facts (most frequent purchase, priciest weekday, no-spend days, biggest expense, change vs. the previous period). Can be saved as an image, by default without amounts. The weekly summary and monthly report notifications now open the report, and Home shows "last month's report is ready" during the first 3 days of a cycle.
+
+### 4. Fixes to existing formulas
+- The automatic daily allowance (Control tab and evening notification) was "remaining monthly limit ÷ remaining days" and ignored bills still due this month. It now uses the safe-to-spend amount above.
+- The spending-pace status called normal early-month spending (rent, groceries) "overspending" because the ideal line was straight. With 3+ cycles of data it now follows your own pattern.
+- The financial independence number used a fixed 25×; it's now adjustable with a 30× default.
+
+## Features from 4.0 (still included)
 
 ### 1. Financial reset (`•••` menu → Danger zone → **Reset keuangan**)
 All money goes back to zero and the app returns to a fresh-install state: Home, **Insights, Projection, Control, and Plan are all empty**. Transactions, accounts, custom categories, templates, envelope budgets, bills, savings goals and their allocations, debts and receivables, wishlist, trash, control limits, projection assumptions, saved simulations, and notification alert history are all deleted. The default categories and the "Dompet utama" (Main wallet) account are recreated. Kept: theme, animation setting, PIN and fingerprint, and nickname.
@@ -151,21 +177,26 @@ A **forecast confidence** card (Low/Medium/High) is always shown at the top, wit
 
 ## Backups and reports
 
-- JSON backups use **schema 5** and include transactions (with accounts), accounts, categories + icons, templates, budgets, bills (+ cycle), goals + deadlines, allocations, debts and receivables, wishlist, **trash**, and settings (including **currency**, projection assumptions, and simulation scenarios).
-- Backups with schema 1–4 (Dompet 1.x–3.5) can still be restored. Restoring **replaces** all data on the phone.
+- JSON backups use **schema 6** and include transactions (with accounts), accounts, categories + icons, templates, budgets (+ rollover), bills (+ cycle), goals + deadlines (+ linked account), allocations, debts and receivables, wishlist, trash, the suggestion inbox, and settings (including currency, pay-cycle start day, safe-to-spend buffer, projection assumptions, and simulation scenarios). Device-only preferences (notification-reader apps, widget, auto-backup folder and password) are not included.
+- Backups with schema 1–5 (Dompet 1.x–4.0) can still be restored, including password-protected automatic backups. Restoring **replaces** all data on the phone.
 - PDF, CSV, and JSON files always contain the real amounts, even when privacy mode is on.
 
 ## Testing and limitations (please read)
 
 Verified:
 
-- The 4.0 APK was compiled, dexed, aligned, and signed (v1/v2/v3 schemes). Its SHA-256 certificate `4d:b3:85:79…7f:6d:8e` is **the same** as release 3.5, so it installs as an update.
-- `python3 tests/check_schema.py`: migrations from v1, v2, v2.5, and **3.x (schema 4)** to schema 5 (data, balances, categories, main account, goals, and templates stay intact; existing bills stay monthly), a fresh install, transfer balances, **every SQL query in the source code** against schema 5, and checks that **reset and currency conversion cover every table and amount column** and that every table is included in backups.
-- `bash tests/run_logic_tests.sh`: 980+ existing logic checks and 12,000+ forecast & simulation checks (all still pass), **plus 150,000+ new 4.0 checks** (`tests/V4Test.java`): formatting/parsing/calculator for 18 currencies (including cents, decimal comma, and symbols with a space), round-trip rate conversion, extreme values, scaled thresholds, privacy masking, conversion of simulation scenarios, bill cycles (weekly through yearly, 31 Jan → 30 Apr → 31 Jul, 29 Feb), monthly burden, scheduling and monthly forecasts with yearly/weekly/quarterly bills, and 300 randomized tests.
+- The 5.0 APK was compiled, dexed, aligned, and signed (v1/v2/v3 schemes). Its SHA-256 certificate `4d:b3:85:79…7f:6d:8e` is **the same** as releases 3.5 and 4.0, so it installs as an update.
+- `python3 tests/check_schema.py`: migrations from v1, v2, v2.5, and 3.x (schema 4) to **schema 6** (data, balances, categories, main account, goals, and templates stay intact; existing bills stay monthly), a fresh install, transfer balances, **every SQL query in the source code** against schema 6, and checks that **reset and currency conversion cover every table and amount column** and that every table is included in backups.
+- `bash tests/run_logic_tests.sh`: all earlier suites still pass (980+ logic, 12,000+ forecast & simulation, 150,000+ 4.0 checks), **plus 129,000+ new 5.0 checks** (`tests/V5Test.java`): the pay cycle for every start day 1–28 over three years, cycle-aware end-of-month forecast, safe-to-spend (bills, income timing, buffer, goals, monthly limit, and 2,000 randomized runs proving the balance never drops below the buffer), the personal pace curve, notification parsing (real-world style texts, ignored OTP/promo/failed messages, amount formats, 3,000 random texts), CSV import (BCA, Mandiri/BRI, e-wallet, Dompet's own export, date formats, 1,000 random files), backup encryption (wrong password rejected, Base64 matches the JDK), personal inflation, subscription detection, and weekly/monthly reports. The 4.0 checks are (`tests/V4Test.java`): formatting/parsing/calculator for 18 currencies (including cents, decimal comma, and symbols with a space), round-trip rate conversion, extreme values, scaled thresholds, privacy masking, conversion of simulation scenarios, bill cycles (weekly through yearly, 31 Jan → 30 Apr → 31 Jul, 29 Feb), monthly burden, scheduling and monthly forecasts with yearly/weekly/quarterly bills, and 300 randomized tests.
 
 **Not** yet verified:
 
-- **Not tested on a phone or emulator.** The build environment has no emulator, and Android tests (Robolectric) couldn't be downloaded because Google's repository was blocked. The new screens (currency, trash, reset, bill cycles, fingerprint) follow the same code patterns as the existing screens and were reviewed manually, but layout bugs or crashes are still possible. **Back up your data before updating**, and report any screen that misbehaves.
+- **5.0 has not been tested on a phone or emulator.** The build environment has no emulator, and Android tests (Robolectric) couldn't be downloaded because Google's repository was blocked. All new logic is covered by the JVM tests above; the new screens, the widget, the notification reader, and folder backups follow the existing code patterns and were reviewed manually, but layout bugs or crashes are still possible. The widget and the notification reader in particular depend on the phone and launcher.
+- **Notification formats differ between banks and change over time.** The reader was built from typical Indonesian notification wording, not from real notifications from your phone, so some apps may be missed or read incorrectly. Use the test box in the settings and tell me which texts aren't recognized. Nothing is ever recorded without your confirmation.
+- **CSV exports also differ per bank.** If a file is rejected, the header row usually needs a "Tanggal" column and either "Jumlah" or "Debit"/"Kredit".
+- **Automatic backup** needs a folder whose storage provider supports folder selection (phone storage always works; some cloud apps don't offer it). The backup password is stored on the phone so backups can run unattended; a forgotten password cannot be recovered.
+- **Personal inflation** reads any change in price for the same note as inflation, including a different portion size or brand.
+- 4.0 was tested on your phone without problems; that doesn't cover the 5.0 changes. **Back up your data before updating**, and report any screen that misbehaves.
 - **Fingerprint unlock** uses `FingerprintManager` (API 23). On newer Android versions this API is deprecated but still works on most phones; on phones with face unlock only, the option doesn't appear. If the sensor doesn't respond, the PIN still works.
 - **Exchange rates** are not automatic. Conversion uses the rate you type; each amount is rounded to the smallest unit (cent/rupiah), so converting back and forth can differ by a few rupiah per transaction.
 - **The reset-undo snapshot** is kept in the app's internal storage for 7 days. If the app's data is cleared from Android Settings, the snapshot is lost too; only a JSON backup is safe.
@@ -181,10 +212,15 @@ Verified:
 |---|---|
 | `Schema.java` | Migration SQL v1→v5, default categories & icons |
 | `Db.java` | SQLite access: transactions, **trash**, accounts, categories, budgets, bills, goals, debts, wishlist, settings, **reset & currency conversion** |
-| `Model.java`, `Fmt.java`, `Analytics.java` | Pure Java logic (tested on the JVM): **currency**, formatting, calculator, dates, **bill cycles**, reports, insights, score |
-| `Forecast.java`, `Simulator.java` | Pure forecast and simulation/tool logic (tested in `tests/ForecastTest.java` & `tests/V4Test.java`) |
-| `DataTools.java` | **4.0**: currency, trash, and financial reset + undo screens |
-| `Fingerprint.java` | **4.0**: fingerprint unlock |
+| `Model.java`, `Fmt.java`, `Analytics.java` | Pure Java logic (tested on the JVM): currency, formatting, calculator, dates, **pay cycles**, bill cycles, reports, insights, score, **personal pace curve** |
+| `Forecast.java`, `Simulator.java` | Pure forecast, **safe-to-spend**, and simulation/tool logic (tested in `tests/ForecastTest.java`, `tests/V4Test.java`, `tests/V5Test.java`) |
+| `DataTools.java` | Currency, trash, financial reset + undo (4.0); pay-cycle setting, suggestion inbox, notification-reader settings, CSV import preview, auto-backup and widget settings (5.0) |
+| `Fingerprint.java` | Fingerprint unlock (4.0) |
+| `NotifParser.java`, `NotifReader.java` | **5.0**: reading bank/e-wallet notifications into suggestions (pure parser + Android listener) |
+| `CsvImport.java` | **5.0**: bank-statement CSV parser (pure Java) |
+| `Crypto.java`, `AutoBackup.java` | **5.0**: password encryption (pure Java) and scheduled folder backups |
+| `SaldoWidget.java` | **5.0**: home-screen widget with one-tap recording |
+| `Review.java`, `Wrapped.java` | **5.0**: personal inflation, subscription audit, weekly/monthly report (pure logic + screens) |
 | `Projection.java` | Projection tab: Forecast, Simulation, Tools, home card |
 | `Control.java`, `Notifier.java`, `ReminderReceiver.java` | Control & notification rules, morning/evening alarms |
 | `Ui.java`, `Charts.java` | Theme, components, bottom sheets, animation, custom charts |
@@ -205,6 +241,6 @@ python3 tests/check_schema.py
 bash tests/run_logic_tests.sh
 ```
 
-The output is `Dompet_Ivan_v4.0.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
+The output is `Dompet_Ivan_v5.0.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
 
 Coding rules: **don't use lambdas or method references**, because `dx` doesn't desugar them. Don't call APIs above level 23 directly; use `Build.VERSION.SDK_INT` checks and reflection.

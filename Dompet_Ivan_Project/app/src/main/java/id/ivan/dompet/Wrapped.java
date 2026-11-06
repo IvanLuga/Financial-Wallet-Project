@@ -130,7 +130,8 @@ final class Wrapped {
         double share = (double) e.getValue() / w.expense;
         l.addView(ui.label(hideAmounts ? Fmt.pct(share) : a.money(e.getValue()) + " · " + Fmt.pct(share), 12.5f, ui.muted));
         box.addView(l);
-        ui.bar(box, share, ui.palette[i++ % ui.palette.length], 7);
+        Ui.Bar bar = ui.bar(box, share, ui.palette[i++ % ui.palette.length], 7);
+        if (forImage) bar.shown = bar.value; // gambar digambar sekali: lewati animasi isi bilah
       }
     }
     // Fakta
