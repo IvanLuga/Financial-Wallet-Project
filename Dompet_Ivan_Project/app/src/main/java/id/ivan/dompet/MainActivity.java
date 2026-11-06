@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     ui = new Ui(this, dark, prefs.getBoolean("animate", true));
     db = new Db(this);
     db.getReadableDatabase(); // membuka database = memuat mata uang aktif sebelum layar digambar
-    period = Fmt.period(Fmt.today());
+    period = Fmt.cycle(Fmt.today());
     if (state != null) {
       tab = state.getInt("tab", 0);
       period = state.getString("period", period);
@@ -164,7 +164,7 @@ public class MainActivity extends Activity {
     if (i == null || !i.hasExtra("tab")) return false;
     tab = Math.max(0, Math.min(4, i.getIntExtra("tab", 0)));
     i.removeExtra("tab");
-    if (tab == TAB_CONTROL || tab == TAB_INSIGHT) period = Fmt.period(Fmt.today());
+    if (tab == TAB_CONTROL || tab == TAB_INSIGHT) period = Fmt.cycle(Fmt.today());
     return true;
   }
 
@@ -369,7 +369,7 @@ public class MainActivity extends Activity {
     }
     boolean showMonth = tab == TAB_HOME || tab == TAB_CONTROL || (tab == TAB_INSIGHT && insights.range == 0);
     monthBar.setVisibility(showMonth && home.results == null ? View.VISIBLE : View.GONE);
-    monthLabel.setText(Fmt.monthName(period) + (period.equals(Fmt.period(today)) ? "" : "  ·  ketuk untuk pilih"));
+    monthLabel.setText(Fmt.cycleName(period) + (period.equals(Fmt.cycle(today)) || Fmt.cycleDay > 1 ? "" : "  ·  ketuk untuk pilih"));
     searchButton.setVisibility(tab == TAB_HOME ? View.VISIBLE : View.GONE);
     privacyButton.setImageDrawable(tinted(hide ? R.drawable.ic_eye_off : R.drawable.ic_eye));
   }
@@ -428,7 +428,7 @@ public class MainActivity extends Activity {
     s.body.addView(yearRow);
     ui.gap(s.body, 8);
     s.body.addView(months);
-    s.secondary("Bulan ini", ui.primary, new Runnable() { public void run() { s.dismiss(); period = Fmt.period(Fmt.today()); render(true); } });
+    s.secondary("Bulan ini", ui.primary, new Runnable() { public void run() { s.dismiss(); period = Fmt.cycle(Fmt.today()); render(true); } });
     s.show();
   }
 
@@ -487,6 +487,7 @@ public class MainActivity extends Activity {
     s.item("🏷️", "Kelola kategori", "Tambah, ubah nama/ikon, hapus", ui.purple, new Runnable() { public void run() { forms.categories(0); } });
     s.item("⚡", "Template transaksi cepat", db.templates().size() + " template", ui.gold, new Runnable() { public void run() { forms.templates(); } });
     s.item(Fmt.cur.flag, "Mata uang", DataTools.label(Fmt.cur), ui.green, new Runnable() { public void run() { tools.currencyMenu(); } });
+    s.item("📆", "Awal bulan keuangan", DataTools.cycleLabel(), ui.blue, new Runnable() { public void run() { tools.cycleMenu(); } });
     long trash = db.trashCount();
     s.item("🗑️", "Tempat sampah", trash == 0 ? "Kosong · transaksi terhapus disimpan " + Db.TRASH_DAYS + " hari" : trash + " transaksi · bisa dipulihkan", ui.muted, new Runnable() { public void run() { tools.trash(); } });
     s.item("🎨", "Tema tampilan", new String[]{"Ikuti sistem", "Terang", "Gelap"}[prefs.getInt("theme", 0)], ui.primary, new Runnable() { public void run() { themeMenu(); } });
@@ -498,7 +499,7 @@ public class MainActivity extends Activity {
     s.item("💾", "Cadangkan data (JSON)", lastBackupLabel(), ui.green, new Runnable() { public void run() { backup(); } });
     s.item("♻️", "Pulihkan dari cadangan", "Mengganti semua data di HP ini", ui.gold, new Runnable() { public void run() { restorePrompt(); } });
     s.item("📐", "Asumsi proyeksi", "Kenaikan pemasukan " + Projection.pct1(Projection.assumption(db, "asm_inc", 30)) + " · inflasi " + Projection.pct1(Projection.assumption(db, "asm_infl", 30)) + " · imbal hasil " + Projection.pct1(Projection.assumption(db, "asm_ret", 0)), ui.purple, new Runnable() { public void run() { projection.assumptions(); } });
-    s.item("🔔", "Pengaturan notifikasi", "Batas, jam pengecekan, jenis pengingat", ui.primary, new Runnable() { public void run() { tab = TAB_CONTROL; period = Fmt.period(Fmt.today()); render(true); handler.postDelayed(new Runnable() { public void run() { control.scrollToSettings(); } }, 400); } });
+    s.item("🔔", "Pengaturan notifikasi", "Batas, jam pengecekan, jenis pengingat", ui.primary, new Runnable() { public void run() { tab = TAB_CONTROL; period = Fmt.cycle(Fmt.today()); render(true); handler.postDelayed(new Runnable() { public void run() { control.scrollToSettings(); } }, 400); } });
     s.item("ℹ️", "Tentang " + APP_NAME, "Versi, privasi, batasan", ui.muted, new Runnable() { public void run() { forms.about(); } });
     TextView danger = ui.caps("Zona berbahaya", ui.red);
     ui.pad(danger, 6, 16, 0, 4);

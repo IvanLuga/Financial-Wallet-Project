@@ -42,9 +42,10 @@ final class Home {
     long total = db.total(), reserved = db.totalSaved();
 
     hero(body, total, reserved, inc, exp);
+    if (period.equals(Fmt.cycle(today))) a.projection.safeCard(body);
     accounts(body);
     controlStatus(body, period, today);
-    if (period.equals(Fmt.period(today))) a.projection.homeCard(body);
+    if (period.equals(Fmt.cycle(today))) a.projection.homeCard(body);
     quick(body);
     upcoming(body, today);
     categories(body, month, exp);
@@ -142,7 +143,7 @@ final class Home {
 
   private void controlStatus(LinearLayout body, String period, String today) {
     Control.Settings s = Control.load(db);
-    if (!period.equals(Fmt.period(today))) return;
+    if (!period.equals(Fmt.cycle(today))) return;
     LinearLayout c = ui.card(body);
     if (s.monthLimit <= 0) {
       LinearLayout r = ui.row();

@@ -378,17 +378,20 @@ final class Forecast {
     long safePerDay() { return remaining <= 0 ? 0 : Math.max(0, predInc - actualExp - restSched) / remaining; }
   }
 
-  /** Realisasi bulan berjalan + perkiraan sisa hari (laju harian + item terjadwal), per kategori dan dibanding amplop. */
+  /**
+   * Realisasi bulan (siklus) berjalan + perkiraan sisa hari (laju harian + item terjadwal), per kategori dan
+   * dibanding amplop. Mengikuti siklus gajian bila Fmt.cycleDay > 1.
+   */
   static MonthEnd monthEnd(Base b, List<Tx> monthTx, List<Item> items, String today, Map<String, Long> budgets) {
     MonthEnd m = new MonthEnd();
-    m.period = Fmt.period(today);
-    m.days = Fmt.daysInMonth(m.period);
-    m.day = Fmt.day(today);
+    m.period = Fmt.cycle(today);
+    m.days = Fmt.cycleDays(m.period);
+    m.day = Fmt.cycleIndex(today);
     m.remaining = m.days - m.day;
-    String end = Fmt.monthEnd(m.period), tomorrow = Fmt.addDays(today, 1);
+    String end = Fmt.cycleEnd(m.period), tomorrow = Fmt.addDays(today, 1);
     LinkedHashMap<String, Long> actualCat = new LinkedHashMap<>();
     for (Tx t : monthTx) {
-      if (!flow(t) || !Fmt.period(t.date).equals(m.period)) continue;
+      if (!flow(t) || !Fmt.cycle(t.date).equals(m.period)) continue;
       if (t.type == Model.INCOME) m.actualInc += t.amount;
       else { m.actualExp += t.amount; Analytics.add(actualCat, t.cat, t.amount); }
     }
@@ -450,6 +453,62 @@ final class Forecast {
       }
     });
     return m;
+  }
+
+  // ======================= Aman dibelanjakan hari ini (5.0) =======================
+
+  static final class Safe {
+    /** perDay = batas belanja harian yang aman sampai akhir siklus; leftToday = sisa untuk hari ini. */
+    long perDay, leftToday, spentToday, opening, buffer, goalsAside, incomeAhead, expenseAhead, limitPerDay = -1, cashPerDay;
+    int daysLeft;
+    String end, bindDate;
+    boolean limitBinds;
+  }
+
+  /**
+   * Laju belanja harian tetap tertinggi yang tidak membuat saldo turun di bawah dana cadangan pada hari mana pun
+   * sampai akhir siklus, dengan memperhitungkan tagihan, cicilan, utang, dan transaksi rutin terjadwal (pemasukan
+   * terjadwal baru dihitung setelah tanggalnya), dikurangi jatah setoran target. Bila ada batas bulanan, hasilnya
+   * juga tidak melebihi sisa batas setelah tagihan terjadwal.
+   *
+   * @param available      saldo tersedia sekarang (sudah dikurangi belanja hari ini dan uang target)
+   * @param spentToday     pengeluaran yang sudah dicatat hari ini
+   * @param goalsPerCycle  setoran target yang perlu disisihkan per siklus
+   * @param limitLeft      sisa batas bulanan sebelum hari ini (batas − pengeluaran siklus sebelum hari ini), −1 bila tanpa batas
+   */
+  static Safe safeToSpend(long available, long spentToday, List<Item> items, String today, String end, long buffer, long goalsPerCycle, int cycleDays, long limitLeft) {
+    Safe s = new Safe();
+    s.end = end;
+    s.daysLeft = Math.max(1, Fmt.daysBetween(today, end) + 1);
+    s.spentToday = Math.max(0, spentToday);
+    s.opening = available + s.spentToday;
+    s.buffer = Math.max(0, buffer);
+    HashMap<String, long[]> byDay = new HashMap<>();
+    if (items != null) for (Item it : items) {
+      if (it.date.compareTo(today) <= 0 || it.date.compareTo(end) > 0) continue;
+      long[] v = byDay.get(it.date);
+      if (v == null) { v = new long[2]; byDay.put(it.date, v); }
+      if (it.type == Model.INCOME) { v[0] += it.amount; s.incomeAhead += it.amount; } else { v[1] += it.amount; s.expenseAhead += it.amount; }
+    }
+    double goalPerDay = cycleDays <= 0 ? 0 : Math.max(0, goalsPerCycle) / (double) cycleDays;
+    s.goalsAside = round(goalPerDay * s.daysLeft);
+    long inc = 0, exp = 0;
+    double best = Double.MAX_VALUE;
+    for (int k = 1; k <= s.daysLeft; k++) {
+      String d = Fmt.addDays(today, k - 1);
+      long[] v = byDay.get(d);
+      if (v != null) { inc += v[0]; exp += v[1]; }
+      double cand = (s.opening - s.buffer + inc - exp) / (double) k;
+      if (cand < best) { best = cand; s.bindDate = d; }
+    }
+    s.cashPerDay = Math.max(0, round(best - goalPerDay));
+    s.perDay = s.cashPerDay;
+    if (limitLeft >= 0) {
+      s.limitPerDay = Math.max(0, limitLeft - s.expenseAhead) / s.daysLeft;
+      if (s.limitPerDay < s.perDay) { s.perDay = s.limitPerDay; s.limitBinds = true; }
+    }
+    s.leftToday = s.perDay - s.spentToday;
+    return s;
   }
 
   // ======================= Riwayat & prediksi bulanan =======================

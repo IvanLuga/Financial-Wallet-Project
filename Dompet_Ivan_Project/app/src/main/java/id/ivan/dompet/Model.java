@@ -20,7 +20,11 @@ final class Model {
     }
   }
 
-  static final class Budget { String period, category; long limit; }
+  /**
+   * limit = batas efektif periode ini (base + carry). base = batas yang diisi pengguna; carry = sisa amplop
+   * siklus sebelumnya yang terbawa (5.0, hanya bila rollover aktif dan sisanya positif).
+   */
+  static final class Budget { String period, category; long limit, base, carry; boolean rollover; }
 
   /**
    * anchor = tanggal asli jatuh tempo (1–31) agar tagihan tgl 31 tidak bergeser ke 28 setelah Februari.
@@ -78,7 +82,8 @@ final class Model {
     static boolean validFreq(int f) { return f >= FREQ_MONTH && f <= FREQ_YEAR; }
   }
 
-  static final class Goal { long id, target, saved; String name, deadline = ""; }
+  /** account > 0 (5.0): target tertaut ke akun; saved = saldo akun itu, bukan jumlah alokasi. */
+  static final class Goal { long id, target, saved, account; String name, deadline = ""; }
 
   static final class Template { long id, amount, account = 1; int type; String name, cat, note; }
 

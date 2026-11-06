@@ -440,6 +440,8 @@ final class Charts {
 
   static final class Pace extends Base {
     final long[] cumulative; final int days; final long limit; final Ui.Money fmt;
+    /** Jalur ideal pribadi (5.0, 101 titik) atau null untuk garis lurus. */
+    double[] curve;
     int selected = -1;
 
     /** @param cumulative pengeluaran kumulatif per hari yang sudah berjalan */
@@ -449,11 +451,19 @@ final class Charts {
       setContentDescription("Grafik kecepatan belanja kumulatif dibanding batas.");
     }
 
+    /** Porsi batas yang ideal sudah terpakai pada akhir hari ke-(i+1). */
+    double idealShare(int i) {
+      double x = (i + 1) / (double) days;
+      return curve == null ? x : Analytics.curveAt(curve, x);
+    }
+
     @Override protected void onMeasure(int w, int h) { setMeasuredDimension(MeasureSpec.getSize(w), (int) dp(180)); }
 
     long projected() {
       int n = cumulative.length;
-      return n == 0 ? 0 : cumulative[n - 1] * days / n;
+      if (n == 0) return 0;
+      double f = idealShare(n - 1);
+      return curve != null && f >= 0.03 ? Math.round(cumulative[n - 1] / f) : cumulative[n - 1] * days / n;
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
@@ -485,7 +495,13 @@ final class Charts {
         p.setPathEffect(new DashPathEffect(new float[]{dp(6), dp(4)}, 0));
         c.drawLine(0, ly, w, ly, p);
         p.setColor(ui.faint);
-        c.drawLine(0, bottom, w, ly, p);
+        if (curve == null) c.drawLine(0, bottom, w, ly, p);
+        else {
+          Path ideal = new Path();
+          ideal.moveTo(0, bottom);
+          for (int i = 0; i < days; i++) ideal.lineTo(w * i / (days - 1f), (float) (bottom - h * limit * idealShare(i) / max));
+          c.drawPath(ideal, p);
+        }
         p.setPathEffect(null);
         p.setStyle(Paint.Style.FILL); p.setTextSize(dp(9.5f)); p.setColor(ui.red); p.setTextAlign(Paint.Align.RIGHT);
         if (!fmt.f(limit).contains("•")) c.drawText("Batas " + Fmt.compact(limit), w, ly - dp(4), p);
@@ -523,7 +539,7 @@ final class Charts {
         p.setColor(ui.text); p.setStrokeWidth(dp(1));
         c.drawLine(x, top, x, bottom, p);
         c.drawCircle(x, y, dp(5), p);
-        long ideal = limit * (selected + 1) / days;
+        long ideal = Math.round(limit * idealShare(selected));
         tooltip(c, x, 0, limit > 0
           ? new String[]{"Hari ke-" + (selected + 1) + ": " + fmt.f(cumulative[selected]), "Ideal: " + fmt.f(ideal)}
           : new String[]{"Hari ke-" + (selected + 1), fmt.f(cumulative[selected])}, null);
@@ -534,16 +550,17 @@ final class Charts {
   // ---------------- Kalender panas ----------------
 
   static final class Heatmap extends Base {
-    final String period; final long[] daily; final int offset, days; long max = 1; int selected = -1;
+    /** start = tanggal pertama siklus (tgl 1 untuk bulan kalender); daily[i] = pengeluaran hari start+i. */
+    final String start; final long[] daily; final int offset, days; long max = 1; int selected = -1;
     OnPick onPick;
 
-    Heatmap(Ui ui, String period, long[] daily) {
+    Heatmap(Ui ui, String start, long[] daily) {
       super(ui);
-      this.period = period; this.daily = daily;
-      days = Fmt.daysInMonth(period);
-      offset = Fmt.weekday(period + "-01");
+      this.start = start; this.daily = daily;
+      days = daily.length;
+      offset = Fmt.weekday(start);
       for (long v : daily) max = Math.max(max, v);
-      setContentDescription("Kalender pengeluaran " + Fmt.monthName(period) + ". Ketuk tanggal untuk melihat transaksi.");
+      setContentDescription("Kalender pengeluaran " + Fmt.cycleName(Fmt.cycle(start)) + ". Ketuk tanggal untuk melihat transaksi.");
     }
 
     int rows() { return (offset + days + 6) / 7; }
@@ -588,7 +605,7 @@ final class Charts {
         RectF r = new RectF(x + gap + inset, y + gap + inset, x + cell - gap - inset, y + ch - gap - inset);
         p.setColor(fill);
         c.drawRoundRect(r, dp(9), dp(9), p);
-        String iso = period + "-" + Fmt.pad2(d + 1);
+        String iso = Fmt.addDays(start, d);
         if (iso.equals(today) || d == selected) {
           p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(d == selected ? 2.4f : 1.5f));
           p.setColor(d == selected ? ui.text : ui.primary);
@@ -597,7 +614,7 @@ final class Charts {
         }
         p.setColor(t > 0.5f ? 0xFFFFFFFF : ui.text);
         p.setTextSize(dp(11.5f));
-        c.drawText(Integer.toString(d + 1), r.centerX(), r.centerY() + dp(4), p);
+        c.drawText(Integer.toString(Fmt.day(iso)), r.centerX(), r.centerY() + dp(4), p);
       }
     }
   }

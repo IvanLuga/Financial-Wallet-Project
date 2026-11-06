@@ -499,7 +499,7 @@ final class Forms {
     ui.pad(m, 0, 10, 0, 4);
     s.body.addView(m);
     s.body.addView(ui.text("Peringatan ini juga dikirim sebagai notifikasi. Atur jenis & ambangnya di tab Kontrol.", 12, ui.muted));
-    s.secondary("Lihat kontrol", ui.primary, new Runnable() { public void run() { s.dismiss(); a.period = Fmt.period(Fmt.today()); a.go(MainActivity.TAB_CONTROL); } });
+    s.secondary("Lihat kontrol", ui.primary, new Runnable() { public void run() { s.dismiss(); a.period = Fmt.cycle(Fmt.today()); a.go(MainActivity.TAB_CONTROL); } });
     s.primary("Mengerti", x.level == Analytics.BAD ? ui.red : ui.gold, new Runnable() { public void run() { s.dismiss(); } });
     s.show();
   }
@@ -512,7 +512,7 @@ final class Forms {
     s.body.addView(q);
     final int[] type = {-1};
     final String[] cat = {""};
-    final String[] range = {Fmt.monthStart(a.period), Fmt.monthEnd(a.period)};
+    final String[] range = {Fmt.cycleStart(a.period), Fmt.cycleEnd(a.period)};
     final boolean[] all = {false};
     final long[] acc = {0};
     ui.fieldLabel(s.body, "Jenis");

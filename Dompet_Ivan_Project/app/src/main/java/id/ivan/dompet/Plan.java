@@ -223,7 +223,7 @@ final class Plan {
 
   private void goals(LinearLayout body) {
     long reserved = db.totalSaved(), available = db.total() - reserved;
-    summary(body, new String[]{"Dialokasikan", "Saldo bebas"}, new String[]{a.money(reserved), a.money(available)}, new int[]{ui.primary, available < 0 ? ui.red : ui.green});
+    summary(body, new String[]{"Untuk target", "Saldo bebas"}, new String[]{a.money(reserved), a.money(available)}, new int[]{ui.primary, available < 0 ? ui.red : ui.green});
     body.addView(ui.button("+ Target tabungan", ui.primary, new Runnable() { public void run() { editGoal(null); } }));
     ui.gap(body, 12);
     ArrayList<Goal> list = db.goals();
@@ -237,7 +237,7 @@ final class Plan {
       ui.hgap(r, 12);
       LinearLayout t = ui.col();
       t.addView(ui.label(g.name, 15, ui.text));
-      t.addView(ui.text(a.money(g.saved) + " dari " + a.money(g.target), 12, ui.muted));
+      t.addView(ui.text((g.account > 0 ? "🔗 " + db.accountName(g.account) + " · " : "") + a.money(g.saved) + " dari " + a.money(g.target), 12, ui.muted));
       r.addView(t, Ui.weight(1));
       r.addView(ui.title(Fmt.pct(Math.min(1, (double) g.saved / g.target)), 17));
       c.addView(r);
@@ -253,9 +253,16 @@ final class Plan {
       c.addView(ui.text(info, 12, done ? ui.gold : ui.muted));
       ui.gap(c, 8);
       LinearLayout btns = ui.row();
-      btns.addView(ui.button("Alokasikan", ui.green, new Runnable() { public void run() { contribute(g, false); } }), Ui.weight(1));
-      ui.hgap(btns, 8);
-      btns.addView(ui.outline("Tarik", ui.muted, new Runnable() { public void run() { contribute(g, true); } }), Ui.weight(1));
+      if (g.account > 0) {
+        // Target tertaut: kemajuan = saldo akun, jadi setor/tarik dicatat sebagai transfer ke/dari akun itu.
+        btns.addView(ui.button("Setor (transfer)", ui.green, new Runnable() { public void run() { transfer(g, false); } }), Ui.weight(1));
+        ui.hgap(btns, 8);
+        btns.addView(ui.outline("Tarik", ui.muted, new Runnable() { public void run() { transfer(g, true); } }), Ui.weight(1));
+      } else {
+        btns.addView(ui.button("Alokasikan", ui.green, new Runnable() { public void run() { contribute(g, false); } }), Ui.weight(1));
+        ui.hgap(btns, 8);
+        btns.addView(ui.outline("Tarik", ui.muted, new Runnable() { public void run() { contribute(g, true); } }), Ui.weight(1));
+      }
       c.addView(btns);
       c.setOnLongClickListener(new View.OnLongClickListener() { public boolean onLongClick(View v) { editGoal(g); return true; } });
     }
@@ -280,7 +287,29 @@ final class Plan {
         });
       }
     });
-    long avg = db.avgMonthlyExpense(Fmt.period(Fmt.today()));
+    ui.fieldLabel(s.body, "Simpan di akun (opsional)");
+    final long[] acc = {old == null ? 0 : old.account};
+    final LinearLayout accRow = ui.row();
+    s.body.addView(ui.hscroll(accRow));
+    final TextView accHint = ui.text("", 12, ui.muted);
+    s.body.addView(accHint);
+    final java.util.HashSet<Long> taken = db.linkedAccounts(old == null ? 0 : old.id);
+    final Runnable[] fillAcc = new Runnable[1];
+    fillAcc[0] = new Runnable() {
+      public void run() {
+        accRow.removeAllViews();
+        addChip(accRow, "Tidak ditautkan", acc[0] == 0, new Runnable() { public void run() { acc[0] = 0; fillAcc[0].run(); } });
+        for (final Account x : db.accounts(false)) {
+          if (taken.contains(x.id)) continue;
+          addChip(accRow, (x.icon.isEmpty() ? "" : x.icon + " ") + x.name, acc[0] == x.id, new Runnable() { public void run() { acc[0] = x.id; fillAcc[0].run(); } });
+        }
+        accHint.setText(acc[0] == 0
+          ? "Uang target dipisahkan lewat \"Alokasikan\" tanpa memindahkan uang antar-akun."
+          : "Kemajuan target = saldo akun ini, dan saldonya tidak dihitung sebagai saldo bebas. Setor/tarik dicatat sebagai transfer.");
+      }
+    };
+    fillAcc[0].run();
+    long avg = db.avgMonthlyExpense(Fmt.cycle(Fmt.today()));
     if (old == null && avg > 0) {
       ui.gap(s.body, 8);
       final long efStep = Fmt.th(100_000), ef = Math.round(avg * 3 / (double) efStep) * efStep;
@@ -300,12 +329,35 @@ final class Plan {
         long t = Fmt.parseAmount(target.getText().toString());
         if (n.isEmpty()) { name.setError("Isi nama"); return; }
         if (t <= 0) { target.setError("Isi nilai target"); return; }
-        db.putGoal(old == null ? 0 : old.id, n, t, deadline[0]);
+        db.putGoal(old == null ? 0 : old.id, n, t, deadline[0], acc[0]);
         s.dismiss();
         a.render(false);
       }
     });
     s.show();
+  }
+
+  private void addChip(LinearLayout row, String label, boolean on, Runnable r) {
+    TextView c = ui.chip(label, on, ui.primary);
+    ui.click(c, r);
+    LinearLayout.LayoutParams p = Ui.lp(Ui.WRAP, Ui.WRAP);
+    p.rightMargin = ui.dp(8);
+    row.addView(c, p);
+  }
+
+  /** Setor/tarik untuk target tertaut: membuka formulir transfer ke/dari akun target. */
+  private void transfer(Goal g, boolean withdraw) {
+    Account target = db.account(g.account);
+    if (target == null) { a.toast("Akun target tidak ditemukan"); return; }
+    Tx t = new Tx();
+    t.type = Model.TRANSFER;
+    t.date = Fmt.today();
+    long other = 0;
+    long def = db.settingLong("default_account", 1);
+    for (Account x : db.accounts(false)) if (x.id != g.account && (other == 0 || x.id == def)) other = x.id;
+    if (withdraw) { t.account = g.account; t.toAccount = other; } else { t.account = other == 0 ? 1 : other; t.toAccount = g.account; }
+    t.note = (withdraw ? "Tarik dari target " : "Setor target ") + g.name;
+    a.forms.tx(t);
   }
 
   private void contribute(final Goal g, final boolean withdraw) {

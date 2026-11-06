@@ -213,7 +213,7 @@ final class PdfReport {
       section("Pengeluaran harian", r.biggestDay >= 0 ? "puncak " + Fmt.dayShort(Fmt.addDays(r.from, r.biggestDay)) : null);
       String[] labels = new String[r.days];
       for (int i = 0; i < r.days; i++) labels[i] = (i % 5 == 0 || i == r.days - 1) ? Integer.toString(Fmt.day(Fmt.addDays(r.from, i))) : "";
-      bars(labels, new long[][]{r.dailyExp}, new int[]{TEAL}, 120, d.settings != null && d.settings.monthLimit > 0 && r.days <= 31 ? d.settings.monthLimit / Math.max(1, Fmt.daysInMonth(Fmt.period(r.to))) : 0);
+      bars(labels, new long[][]{r.dailyExp}, new int[]{TEAL}, 120, d.settings != null && d.settings.monthLimit > 0 && r.days <= 31 ? d.settings.monthLimit / Math.max(1, Fmt.cycleDays(Fmt.cycle(r.to))) : 0);
     }
 
     if (!r.byCat.isEmpty()) {

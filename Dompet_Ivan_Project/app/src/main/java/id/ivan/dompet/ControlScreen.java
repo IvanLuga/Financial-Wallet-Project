@@ -32,7 +32,7 @@ final class ControlScreen {
   void build(LinearLayout body) {
     Control.Settings s = Control.load(db);
     String period = a.period, today = Fmt.today();
-    boolean current = period.equals(Fmt.period(today));
+    boolean current = period.equals(Fmt.cycle(today));
     if (!Notifier.permitted(a)) permissionCard(body);
     limitHero(body, s, period, current);
     if (current) today(body, s, today);
@@ -81,17 +81,17 @@ final class ControlScreen {
       c.addView(ui.badge("🛡️", "K", ui.primary, 52));
       ui.gap(c, 10);
       c.addView(ui.title("Pasang batas belanja bulanan", 18));
-      long avg = db.avgMonthlyExpense(Fmt.period(Fmt.today()));
+      long avg = db.avgMonthlyExpense(Fmt.cycle(Fmt.today()));
       c.addView(ui.text("Batas membantu Dompet menghitung jatah harian, mendeteksi kecepatan belanja, dan mengirim notifikasi saat kamu mulai boros." +
         (avg > 0 ? " Rata-rata pengeluaranmu ≈ " + a.money(avg) + "/bulan." : ""), 13, ui.muted));
       ui.gap(c, 12);
       c.addView(ui.button("Atur batas", ui.primary, new Runnable() { public void run() { limits(); } }));
       return;
     }
-    Analytics.Pace p = Analytics.pace(s.monthLimit, Control.spentMonth(db, period), current ? Fmt.day(Fmt.today()) : (period.compareTo(Fmt.period(Fmt.today())) < 0 ? Fmt.daysInMonth(period) : 1), Fmt.daysInMonth(period));
+    Analytics.Pace p = Analytics.pace(s.monthLimit, Control.spentMonth(db, period), current ? Fmt.cycleIndex(Fmt.today()) : (period.compareTo(Fmt.cycle(Fmt.today())) < 0 ? Fmt.cycleDays(period) : 1), Fmt.cycleDays(period), Control.paceCurve(db, period));
     int color = p.status == 0 ? ui.green : p.status == 1 ? ui.gold : ui.red;
     LinearLayout head = ui.row();
-    head.addView(ui.label("Batas " + Fmt.monthName(period), 15, ui.text), Ui.weight(1));
+    head.addView(ui.label("Batas " + Fmt.cycleName(period), 15, ui.text), Ui.weight(1));
     head.addView(ui.link("Ubah", ui.primary, new Runnable() { public void run() { limits(); } }));
     c.addView(head);
     c.addView(new Charts.Gauge(ui, p.used, color, Fmt.pct(p.used), p.label()), Ui.lp(Ui.MATCH, Ui.WRAP));
@@ -126,11 +126,11 @@ final class ControlScreen {
 
   void limits() {
     final Control.Settings s = Control.load(db);
-    final Ui.Sheet sh = ui.sheet("Batas belanja", "Kosongkan untuk menonaktifkan. Berlaku setiap bulan.");
+    final Ui.Sheet sh = ui.sheet("Batas belanja", "Kosongkan untuk menonaktifkan. Berlaku setiap bulan" + (Fmt.cycleDay > 1 ? " keuangan (mulai tgl " + Fmt.cycleDay + ")." : "."));
     ui.fieldLabel(sh.body, "Batas bulanan (semua pengeluaran)");
     final android.widget.EditText month = ui.moneyInput("Mis. 3.000.000", s.monthLimit);
     sh.body.addView(month);
-    long avg = db.avgMonthlyExpense(Fmt.period(Fmt.today()));
+    long avg = db.avgMonthlyExpense(Fmt.cycle(Fmt.today()));
     if (avg > 0) {
       LinearLayout sug = ui.row();
       ui.pad(sug, 0, 8, 0, 0);
@@ -189,7 +189,7 @@ final class ControlScreen {
       r.addView(ui.label(a.money(spent) + " / " + a.money(allowance), 14, color));
       c.addView(r);
       ui.bar(c, (double) spent / allowance, color, 10);
-      c.addView(ui.text(spent > allowance ? "Lewat " + a.money(spent - allowance) + " dari jatah hari ini." : "Masih bisa " + a.money(allowance - spent) + " hari ini" + (s.dayLimit > 0 ? "." : " (jatah otomatis)."), 12, ui.muted));
+      c.addView(ui.text(spent > allowance ? "Lewat " + a.money(spent - allowance) + " dari jatah hari ini." : "Masih bisa " + a.money(allowance - spent) + " hari ini" + (s.dayLimit > 0 ? "." : " (jatah aman otomatis: sudah memperhitungkan tagihan, target, dan dana cadangan)."), 12, ui.muted));
     }
     if (s.weekLimit > 0) {
       if (allowance > 0) ui.divider(c);
@@ -208,21 +208,30 @@ final class ControlScreen {
   // ---------------- Kecepatan ----------------
 
   private void pace(LinearLayout body, Control.Settings s, String period, boolean current) {
-    int days = Fmt.daysInMonth(period);
-    int elapsed = current ? Fmt.day(Fmt.today()) : period.compareTo(Fmt.period(Fmt.today())) < 0 ? days : 0;
+    int days = Fmt.cycleDays(period);
+    int elapsed = current ? Fmt.cycleIndex(Fmt.today()) : period.compareTo(Fmt.cycle(Fmt.today())) < 0 ? days : 0;
     if (elapsed == 0) return;
     long[] daily = new long[days];
-    for (Tx t : db.month(period)) if (t.type == Model.EXPENSE) daily[Fmt.day(t.date) - 1] += t.amount;
+    for (Tx t : db.month(period)) if (t.type == Model.EXPENSE) daily[Fmt.cycleIndex(t.date) - 1] += t.amount;
     long[] cum = new long[elapsed];
     long acc = 0;
     for (int i = 0; i < elapsed; i++) { acc += daily[i]; cum[i] = acc; }
     if (acc == 0 && s.monthLimit <= 0) return;
     LinearLayout c = ui.card(body);
     c.addView(ui.label("Kecepatan belanja", 15, ui.text));
-    c.addView(ui.text(s.monthLimit > 0 ? "Garis hijau-biru = aktual, abu-abu = jalur ideal, merah = batas, kuning = proyeksi." : "Pengeluaran kumulatif bulan ini. Pasang batas untuk melihat jalur ideal.", 11.5f, ui.muted));
-    c.addView(new Charts.Pace(ui, cum, days, s.monthLimit, a.moneyF), Ui.lp(Ui.MATCH, Ui.WRAP));
+    final double[] curve = s.monthLimit > 0 ? Control.paceCurve(db, period) : null;
+    c.addView(ui.text(s.monthLimit > 0 ? "Garis hijau-biru = aktual, abu-abu = jalur ideal" + (curve != null ? " (mengikuti pola belanjamu 6 siklus terakhir)" : "") + ", merah = batas, kuning = proyeksi." : "Pengeluaran kumulatif bulan ini. Pasang batas untuk melihat jalur ideal.", 11.5f, ui.muted));
+    Charts.Pace chart = new Charts.Pace(ui, cum, days, s.monthLimit, a.moneyF);
+    chart.curve = curve;
+    c.addView(chart, Ui.lp(Ui.MATCH, Ui.WRAP));
+    if (s.monthLimit > 0) {
+      final boolean on = db.flag("pace_personal", true);
+      c.addView(ui.link(on ? (curve != null ? "Pakai jalur lurus saja" : "Jalur pribadi aktif (butuh ≥3 siklus data)") : "Pakai jalur ideal pribadi", ui.primary, new Runnable() {
+        public void run() { db.set("pace_personal", !on); a.render(false); }
+      }));
+    }
     if (current && elapsed >= 3) {
-      long projected = acc * days / elapsed;
+      long projected = chart.projected();
       c.addView(ui.text("Hari ke-" + elapsed + " dari " + days + " · rata-rata " + a.money(acc / elapsed) + "/hari · proyeksi akhir bulan " + a.money(projected) + ".", 12, ui.muted));
     }
   }
@@ -308,6 +317,8 @@ final class ControlScreen {
       line.addView(ui.label(Fmt.pct((double) u / b.limit), 13.5f, color));
       t.addView(line);
       t.addView(ui.text(a.money(u) + " dari " + a.money(b.limit) + (u >= b.limit ? " · lewat " + a.money(u - b.limit) : " · sisa " + a.money(b.limit - u)), 12, ui.muted));
+      if (b.carry > 0) t.addView(ui.text("↪ termasuk sisa terbawa " + a.money(b.carry) + " dari siklus lalu", 11.5f, ui.green));
+      else if (b.rollover) t.addView(ui.text("↪ sisa amplop ini akan terbawa ke siklus berikutnya", 11.5f, ui.muted));
       row.addView(t, Ui.weight(1));
       c.addView(row);
       ui.bar(c, (double) u / b.limit, color, 8);
@@ -326,7 +337,7 @@ final class ControlScreen {
   }
 
   void editBudget(final Budget old, final String period) {
-    final Ui.Sheet s = ui.sheet(old == null ? "Amplop baru" : "Ubah amplop", Fmt.monthName(period));
+    final Ui.Sheet s = ui.sheet(old == null ? "Amplop baru" : "Ubah amplop", Fmt.cycleName(period));
     final String[] cat = {old == null ? "" : old.category};
     ui.fieldLabel(s.body, "Kategori pengeluaran");
     final Ui.Flow f = ui.flow();
@@ -347,8 +358,16 @@ final class ControlScreen {
     };
     fill[0].run();
     ui.fieldLabel(s.body, "Batas per bulan");
-    final android.widget.EditText amount = ui.moneyInput("Mis. 1.500.000", old == null ? 0 : old.limit);
+    final android.widget.EditText amount = ui.moneyInput("Mis. 1.500.000", old == null ? 0 : old.base);
     s.body.addView(amount);
+    final android.widget.CheckBox roll = new android.widget.CheckBox(a);
+    roll.setText("Sisa terbawa ke siklus berikutnya (sisa positif amplop ini menambah batas bulan depan)");
+    roll.setTextColor(ui.text);
+    roll.setTextSize(13);
+    roll.setButtonTintList(android.content.res.ColorStateList.valueOf(ui.primary));
+    roll.setChecked(old != null && old.rollover);
+    s.body.addView(roll);
+    if (old != null && old.carry > 0) s.body.addView(ui.text("Siklus ini mendapat sisa terbawa " + a.money(old.carry) + " → batas efektif " + a.money(old.limit) + ".", 12, ui.green));
     final TextView hint = ui.text("", 12, ui.muted);
     s.body.addView(hint);
     long prev = 0;
@@ -363,7 +382,7 @@ final class ControlScreen {
         long n = Fmt.parseAmount(amount.getText().toString());
         if (cat[0].isEmpty()) { a.toast("Pilih kategori"); return; }
         if (n <= 0) { amount.setError("Isi batas lebih dari 0"); return; }
-        db.putBudget(period, cat[0], n);
+        db.putBudget(period, cat[0], n, roll.isChecked());
         if (old != null && !old.category.equals(cat[0])) db.deleteBudget(period, old.category);
         s.dismiss();
         a.render(false);
@@ -375,11 +394,11 @@ final class ControlScreen {
   // ---------------- Tantangan tanpa belanja ----------------
 
   private void challenge(LinearLayout body, String period, boolean current) {
-    int days = Fmt.daysInMonth(period);
-    int elapsed = current ? Fmt.day(Fmt.today()) : period.compareTo(Fmt.period(Fmt.today())) < 0 ? days : 0;
+    int days = Fmt.cycleDays(period);
+    int elapsed = current ? Fmt.cycleIndex(Fmt.today()) : period.compareTo(Fmt.cycle(Fmt.today())) < 0 ? days : 0;
     if (elapsed == 0) return;
     boolean[] spent = new boolean[days];
-    for (Tx t : db.month(period)) if (t.type == Model.EXPENSE) spent[Fmt.day(t.date) - 1] = true;
+    for (Tx t : db.month(period)) if (t.type == Model.EXPENSE) spent[Fmt.cycleIndex(t.date) - 1] = true;
     int free = 0, streak = 0;
     for (int i = 0; i < elapsed; i++) if (!spent[i]) free++;
     for (int i = elapsed - 1; i >= 0 && !spent[i]; i--) streak++;

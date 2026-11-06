@@ -22,13 +22,13 @@ final class Insights {
   Insights(MainActivity a) { this.a = a; this.ui = a.ui; this.db = a.db; }
 
   String[] range() {
-    String cur = Fmt.period(Fmt.today());
+    String cur = Fmt.cycle(Fmt.today());
     switch (range) {
-      case 1: return new String[]{Fmt.monthStart(Fmt.addMonths(cur, -2)), Fmt.monthEnd(cur)};
-      case 2: return new String[]{Fmt.monthStart(Fmt.addMonths(cur, -5)), Fmt.monthEnd(cur)};
-      case 3: return new String[]{Fmt.monthStart(Fmt.addMonths(cur, -11)), Fmt.monthEnd(cur)};
+      case 1: return new String[]{Fmt.cycleStart(Fmt.addMonths(cur, -2)), Fmt.cycleEnd(cur)};
+      case 2: return new String[]{Fmt.cycleStart(Fmt.addMonths(cur, -5)), Fmt.cycleEnd(cur)};
+      case 3: return new String[]{Fmt.cycleStart(Fmt.addMonths(cur, -11)), Fmt.cycleEnd(cur)};
       case 4: if (customFrom != null) return new String[]{customFrom, customTo};
-      default: return new String[]{Fmt.monthStart(a.period), Fmt.monthEnd(a.period)};
+      default: return new String[]{Fmt.cycleStart(a.period), Fmt.cycleEnd(a.period)};
     }
   }
 
@@ -40,12 +40,12 @@ final class Insights {
     String[] pr = Analytics.prevRange(rg[0], rg[1]);
     Analytics.Report r = Analytics.build(rg[0], rg[1], today, cur, db.range(pr[0], pr[1]));
     Control.Settings s = Control.load(db);
-    String bp = Fmt.period(rg[1]);
-    if (bp.compareTo(Fmt.period(today)) > 0) bp = Fmt.period(today);
+    String bp = Fmt.cycle(rg[1]);
+    if (bp.compareTo(Fmt.cycle(today)) > 0) bp = Fmt.cycle(today);
     Analytics.Extra x = new Analytics.Extra();
     x.available = db.total() - db.totalSaved();
     x.upcoming30 = db.upcomingTotal(30);
-    x.avgMonthlyExpense = db.avgMonthlyExpense(Fmt.period(today));
+    x.avgMonthlyExpense = db.avgMonthlyExpense(Fmt.cycle(today));
     x.debtOwe = db.debtRemaining(0);
     x.debtOwed = db.debtRemaining(1);
     StringBuilder over = new StringBuilder();
@@ -57,13 +57,13 @@ final class Insights {
     }
     x.overNames = over.toString();
     x.recordedDays30 = db.recordedDays(Fmt.addDays(today, -29), today);
-    if (range == 0 && bp.equals(Fmt.period(today))) x.pace = Control.monthPace(db, s, bp);
+    if (range == 0 && bp.equals(Fmt.cycle(today))) x.pace = Control.monthPace(db, s, bp);
     Analytics.insights(r, x);
     r.health = Analytics.health(r.income, r.expense, x.pace, x.budgetsTotal, x.budgetsOver, x.budgetsNear, x.available, x.avgMonthlyExpense, x.upcoming30, x.recordedDays30);
 
     int n = range == 3 ? 12 : 6;
-    String end = Fmt.period(rg[1]);
-    ArrayList<Tx> span = db.range(Fmt.monthStart(Fmt.addMonths(end, -(n - 1))), Fmt.monthEnd(end));
+    String end = Fmt.cycle(rg[1]);
+    ArrayList<Tx> span = db.range(Fmt.cycleStart(Fmt.addMonths(end, -(n - 1))), Fmt.cycleEnd(end));
     PdfReport.Data d = new PdfReport.Data();
     d.r = r;
     d.txs = cur;
@@ -120,11 +120,11 @@ final class Insights {
   }
 
   private void pickCustom() {
-    final String[] f = {customFrom == null ? Fmt.monthStart(a.period) : customFrom};
+    final String[] f = {customFrom == null ? Fmt.cycleStart(a.period) : customFrom};
     a.forms.pickDate(f[0], new Forms.Str() {
       public void on(final String from) {
         a.toast("Sekarang pilih tanggal akhir");
-        a.forms.pickDate(customTo == null || customTo.compareTo(from) < 0 ? Fmt.monthEnd(Fmt.period(from)) : customTo, new Forms.Str() {
+        a.forms.pickDate(customTo == null || customTo.compareTo(from) < 0 ? Fmt.cycleEnd(Fmt.cycle(from)) : customTo, new Forms.Str() {
           public void on(String to) {
             if (to.compareTo(from) < 0) { a.toast("Tanggal akhir harus setelah tanggal awal"); return; }
             if (Fmt.daysBetween(from, to) > 3660) { a.toast("Rentang maksimal 10 tahun"); return; }
@@ -333,7 +333,7 @@ final class Insights {
     String[] labels = new String[r.days];
     for (int i = 0; i < r.days; i++) labels[i] = Integer.toString(Fmt.day(Fmt.addDays(r.from, i)));
     Charts.Bars bars = new Charts.Bars(ui, labels, new long[][]{r.dailyExp}, new int[]{ui.primary}, null, a.moneyF);
-    long ref = d.settings.dayLimit > 0 ? d.settings.dayLimit : d.settings.monthLimit > 0 ? d.settings.monthLimit / Fmt.daysInMonth(Fmt.period(r.to)) : 0;
+    long ref = d.settings.dayLimit > 0 ? d.settings.dayLimit : d.settings.monthLimit > 0 ? d.settings.monthLimit / Fmt.cycleDays(Fmt.cycle(r.to)) : 0;
     if (ref > 0) bars.reference(ref);
     final Analytics.Report rr = r;
     bars.onPick = new Charts.OnPick() { public void pick(int i) {} };
@@ -346,7 +346,7 @@ final class Insights {
   }
 
   private void calendar(LinearLayout body, final Analytics.Report r) {
-    if (!r.from.endsWith("-01") || !Fmt.period(r.from).equals(Fmt.period(r.to)) || !r.to.equals(Fmt.monthEnd(Fmt.period(r.to)))) return;
+    if (!Fmt.wholeCycles(r.from, r.to) || !Fmt.cycle(r.from).equals(Fmt.cycle(r.to))) return;
     LinearLayout c = ui.card(body);
     LinearLayout head = ui.row();
     head.addView(ui.label("Kalender pengeluaran", 15, ui.text), Ui.weight(1));
@@ -355,9 +355,9 @@ final class Insights {
     head.addView(legend("tinggi", ui.red));
     c.addView(head);
     ui.gap(c, 8);
-    final String period = Fmt.period(r.from);
-    Charts.Heatmap h = new Charts.Heatmap(ui, period, r.dailyExp);
-    h.onPick = new Charts.OnPick() { public void pick(int d) { a.forms.dayTransactions(period + "-" + Fmt.pad2(d + 1)); } };
+    final String start = r.from;
+    Charts.Heatmap h = new Charts.Heatmap(ui, start, r.dailyExp);
+    h.onPick = new Charts.OnPick() { public void pick(int d) { a.forms.dayTransactions(Fmt.addDays(start, d)); } };
     c.addView(h, Ui.lp(Ui.MATCH, Ui.WRAP));
     c.addView(ui.text("Ketuk tanggal untuk melihat transaksinya.", 11.5f, ui.muted));
   }

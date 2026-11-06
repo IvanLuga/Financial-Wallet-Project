@@ -361,6 +361,50 @@ final class Fmt {
 
   static int daysInMonth(String period) { return cal(period + "-01").getActualMaximum(Calendar.DAY_OF_MONTH); }
 
+  // ---------- Siklus keuangan / bulan gajian (5.0) ----------
+
+  /**
+   * Tanggal mulai "bulan keuangan" (1–28; 1 = bulan kalender). Diatur Db dari pengaturan "cycle_day".
+   * Siklus diberi label bulan yang memuat sebagian besar harinya: mulai tgl 25 → "November" = 25 Okt – 24 Nov;
+   * mulai tgl 5 → "November" = 5 Nov – 4 Des. Label tetap berformat yyyy-MM sehingga amplop lama tetap cocok.
+   */
+  static int cycleDay = 1;
+
+  static void setCycleDay(int d) { cycleDay = Math.max(1, Math.min(28, d)); }
+
+  /** Label siklus (yyyy-MM) yang memuat tanggal iso. */
+  static String cycle(String iso) {
+    if (cycleDay <= 1) return period(iso);
+    String startMonth = day(iso) >= cycleDay ? period(iso) : addMonths(period(iso), -1);
+    return cycleDay > 15 ? addMonths(startMonth, 1) : startMonth;
+  }
+
+  static String cycleStart(String label) {
+    if (cycleDay <= 1) return monthStart(label);
+    return (cycleDay > 15 ? addMonths(label, -1) : label) + "-" + pad2(cycleDay);
+  }
+
+  static String cycleEnd(String label) { return cycleDay <= 1 ? monthEnd(label) : addDays(cycleStart(addMonths(label, 1)), -1); }
+
+  static int cycleDays(String label) { return daysBetween(cycleStart(label), cycleEnd(label)) + 1; }
+
+  /** Hari ke-berapa tanggal iso di dalam siklusnya (mulai 1). */
+  static int cycleIndex(String iso) { return daysBetween(cycleStart(cycle(iso)), iso) + 1; }
+
+  /** Sisa hari siklus termasuk hari ini. */
+  static int cycleDaysLeft(String iso) { return daysBetween(iso, cycleEnd(cycle(iso))) + 1; }
+
+  /** "November 2026" atau, bila siklus tidak mulai tgl 1, "November 2026 (25 Okt – 24 Nov)". */
+  static String cycleName(String label) {
+    if (cycleDay <= 1) return monthName(label);
+    return monthName(label) + " (" + shortDate(cycleStart(label)) + " – " + shortDate(cycleEnd(label)) + ")";
+  }
+
+  static String shortDate(String iso) { return day(iso) + " " + MONTHS_SHORT[Integer.parseInt(iso.substring(5, 7)) - 1]; }
+
+  /** Rentang [from, to] tepat satu siklus penuh atau lebih. */
+  static boolean wholeCycles(String from, String to) { return from.equals(cycleStart(cycle(from))) && to.equals(cycleEnd(cycle(to))); }
+
   static String monthStart(String period) { return period + "-01"; }
 
   static String monthEnd(String period) { return period + "-" + pad2(daysInMonth(period)); }
@@ -411,6 +455,10 @@ final class Fmt {
 
   static String rangeLabel(String from, String to) {
     if (from.equals(to)) return dayLabel(from);
+    if (cycleDay > 1 && wholeCycles(from, to)) {
+      if (cycle(from).equals(cycle(to))) return cycleName(cycle(from));
+      return monthShort(cycle(from)) + " " + cycle(from).substring(0, 4) + " – " + monthShort(cycle(to)) + " " + cycle(to).substring(0, 4) + " (" + shortDate(from) + " – " + shortDate(to) + ")";
+    }
     if (from.endsWith("-01") && to.equals(monthEnd(period(to)))) {
       if (period(from).equals(period(to))) return monthName(period(from));
       return monthShort(period(from)) + " " + from.substring(0, 4) + " – " + monthShort(period(to)) + " " + to.substring(0, 4);

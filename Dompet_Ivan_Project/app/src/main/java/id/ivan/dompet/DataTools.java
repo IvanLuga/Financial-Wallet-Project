@@ -182,6 +182,57 @@ final class DataTools {
     return e;
   }
 
+  // ======================= Bulan keuangan / tanggal gajian (5.0) =======================
+
+  static String cycleLabel() { return Fmt.cycleDay <= 1 ? "Bulan kalender (tgl 1)" : "Mulai tgl " + Fmt.cycleDay + " · " + Fmt.cycleName(Fmt.cycle(Fmt.today())); }
+
+  void cycleMenu() {
+    final Ui.Sheet s = ui.sheet("Awal bulan keuangan", "Pilih tanggal gajian. Laporan, batas, amplop, jatah aman, dan prediksi akhir bulan mengikuti siklus ini.");
+    final int[] pick = {Fmt.cycleDay};
+    final TextView preview = ui.text("", 13, ui.text);
+    preview.setBackground(ui.round(ui.surface2, 14));
+    ui.pad(preview, 12, 10, 12, 10);
+    final Ui.Flow days = ui.flow();
+    final Runnable[] fill = new Runnable[1];
+    fill[0] = new Runnable() {
+      public void run() {
+        days.removeAllViews();
+        for (int d = 1; d <= 28; d++) {
+          final int v = d;
+          TextView c = ui.chip(d == 1 ? "1 (kalender)" : Integer.toString(d), d == pick[0], ui.primary);
+          c.setMinWidth(ui.dp(d == 1 ? 96 : 46));
+          ui.click(c, new Runnable() { public void run() { pick[0] = v; fill[0].run(); } });
+          days.addView(c);
+        }
+        int keep = Fmt.cycleDay;
+        Fmt.setCycleDay(pick[0]);
+        String label = Fmt.cycle(Fmt.today());
+        String text = pick[0] == 1 ? "Bulan kalender biasa: " + Fmt.monthName(label) + " = 1 – " + Fmt.day(Fmt.cycleEnd(label)) + " " + Fmt.monthShort(label) + "."
+          : "Siklus sekarang: " + Fmt.cycleName(label) + ", " + Fmt.cycleDays(label) + " hari. Siklus diberi nama bulan yang memuat sebagian besar harinya.";
+        Fmt.setCycleDay(keep);
+        preview.setText(text);
+      }
+    };
+    fill[0].run();
+    s.body.addView(days);
+    ui.gap(s.body, 10);
+    s.body.addView(preview);
+    TextView note = ui.text("Tanggal 29–31 tidak tersedia agar setiap bulan punya tanggal yang sama. Amplop yang sudah dibuat tetap tersimpan per nama bulan.", 12, ui.muted);
+    ui.pad(note, 2, 8, 0, 0);
+    s.body.addView(note);
+    s.primary("Simpan", ui.primary, new Runnable() {
+      public void run() {
+        s.dismiss();
+        db.set("cycle_day", pick[0]);
+        db.reloaded();
+        a.period = Fmt.cycle(Fmt.today());
+        a.render(true);
+        a.toast(pick[0] == 1 ? "Memakai bulan kalender" : "Bulan keuangan mulai tanggal " + pick[0]);
+      }
+    });
+    s.show();
+  }
+
   // ======================= Tempat sampah =======================
 
   void trash() {
