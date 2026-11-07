@@ -6,6 +6,10 @@ The app's interface is in Indonesian. In this document, in-app labels are shown 
 
 Home-screen name: **Dompet Ivan** (short enough not to be cut off). Inside the app, in PDFs, and in backups: **Dompet Ivan v5.0**.
 
+## 5.0.1 (small update)
+- New launcher icon from the "Digital Wallet v5.0 · Keep Your Money" logo (adaptive icon for Android 8+, rounded icon for older versions). Source image and generator: `art/logo.jpg`, `art/make_icons.py`.
+- Version 5.0.1, version code **8**: install `Dompet_Ivan_v5.0.1.apk` over 5.0 (or older) with **Update**. No database or feature changes.
+
 ## Installing the update (3.x / 4.0 → 5.0)
 
 1. In the old app, open the `•••` menu → **Cadangkan data (JSON)** (Back up data). Keep a copy somewhere off the phone as well.
@@ -241,6 +245,6 @@ python3 tests/check_schema.py
 bash tests/run_logic_tests.sh
 ```
 
-The output is `Dompet_Ivan_v5.0.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
+The output is `Dompet_Ivan_v5.0.1.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
 
 Coding rules: **don't use lambdas or method references**, because `dx` doesn't desugar them. Don't call APIs above level 23 directly; use `Build.VERSION.SDK_INT` checks and reflection.
