@@ -35,8 +35,8 @@ import java.util.Calendar;
 
 /** Kerangka aplikasi: header, navigasi bawah, tema, kunci PIN, menu pengaturan, dan ekspor/impor berkas. */
 public class MainActivity extends Activity {
-  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0";
-  static final int VERSION_CODE = 7;
+  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0.1";
+  static final int VERSION_CODE = 8;
   static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_PNG = 7, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
