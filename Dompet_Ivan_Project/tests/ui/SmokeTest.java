@@ -92,6 +92,18 @@ public class SmokeTest {
     touch(hero, MotionEvent.ACTION_UP, 400, 260);
     pump();
     for (int i = 0; i < 2; i++) { touch(hero, MotionEvent.ACTION_DOWN, 100, 100); touch(hero, MotionEvent.ACTION_UP, 100, 100); pump(); draw(a, 1080, 2200); }
+    // Tombol + harus tepat di atas celahnya, tidak menimpa tab (bug 5.0.2 awal: menimpa "Proyeksi").
+    for (int w : new int[]{1080, 720, 2200}) {
+      draw(a, w, w == 2200 ? 1080 : 2200);
+      int[] g = new int[2], f = new int[2];
+      a.navGap.getLocationInWindow(g);
+      a.navFab.getLocationInWindow(f);
+      float gapC = g[0] + a.navGap.getWidth() / 2f, fabC = f[0] + a.navFab.getTranslationX() + a.navFab.getWidth() / 2f; // Robolectric 3.8: lokasi tanpa translasi
+      if (Math.abs(gapC - fabC) > 2) throw new AssertionError("tombol + bergeser " + (fabC - gapC) + "px dari celahnya pada lebar " + w);
+    }
+    // Ketiga gaya kartu saldo + lembar pemilihnya.
+    for (int st = 0; st < 3; st++) { a.prefs.edit().putInt("card_style", st).apply(); a.render(false); pump(); draw(a, 1080, 2200); }
+    a.home.cardStyle(); pump();
     a.scroll.scrollTo(0, 600);
     draw(a, 1080, 2200);
     a.togglePrivacy(); pump(); draw(a, 1080, 2200); a.togglePrivacy();

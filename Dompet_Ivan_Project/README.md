@@ -11,9 +11,9 @@ Home-screen name: **Dompet Ivan** (short enough not to be cut off). Inside the a
 Version 5.0.2, version code **9**. Install `Dompet_Ivan_v5.0.2.apk` over any older version with **Update**. No database changes (still schema 6), same signing certificate.
 
 ### New interface
-- **3D balance card** on Home: drag a finger across it to tilt it in 3D (the light and the bubbles inside shift with the tilt), tap it to flip it over and see the cycle breakdown (income, expenses, difference, set aside for goals, savings rate). A gold **3D coin** spins on the card; tapping it opens accounts. When you scroll, the card leans back and fades into the distance.
+- **3D balance card styled like a bank debit card** on Home: solid deep colour, a wavy accent band, fine concentric-circle pattern, a gold EMV-style chip with contactless symbol, a glossy layer and a shiny rim. Three styles, chosen by **long-pressing** the card: **Biru Samudra** (deep blue + gold wave), **Toska Senja** (teal + orange wave), **Obsidian** (matte black + silver). Original design inspired by Indonesian bank cards, not a copy of any bank's card. Drag a finger across it to tilt it in 3D, tap to flip it to the back (magnetic stripe, cycle breakdown and 30-day balance line). The gold coin on the card opens accounts. When you scroll, the card leans back and fades into the distance.
 - **Quick actions** under the card: **Catat**, **Akun**, **Template**, **Rapor**, **Cari**.
-- **Floating navigation bar** with a sliding marker and a raised **+** button (long-press it for templates). The header now has an avatar with your initials that opens the menu; the `•••` button still works.
+- **Floating navigation bar** with a sliding marker and a raised **+** button (long-press it for templates). The **+** sits over its own gap between **Wawasan** and **Proyeksi** (an early 5.0.2 build centred it on the screen, so it covered **Proyeksi**). The header now has an avatar with your initials that opens the menu; the `•••` button still works.
 - **Aurora background and glass cards**, a new deeper colour palette for both light and dark themes, gradient buttons and progress bars.
 - **3D motion everywhere**: screens swing in like a door when you change tabs, cards stand up as they appear, wide cards tilt toward your finger when pressed, and the category chart in **Wawasan** is now a tilted **3D doughnut** whose selected slice lifts up.
 - The lock screen uses the spinning coin as its logo.
@@ -29,7 +29,7 @@ Version 5.0.2, version code **9**. Install `Dompet_Ivan_v5.0.2.apk` over any old
 
 ### Tests
 - `tests/V502Test.java`: 22 checks for the fixes above (run by `tests/run_logic_tests.sh`).
-- `tests/run_ui_smoke.sh` (new): opens every tab, sub-tab and main sheet on the JVM with Robolectric, in light and dark themes, with and without animations and with empty data, then measures, lays out and draws the whole view tree. It catches crashes without a phone; it does not judge how the screens look. Needs JDK 8 and Maven; the libraries are downloaded once to `tests/ui/lib` (not committed).
+- `tests/run_ui_smoke.sh` (new): opens every tab, sub-tab and main sheet on the JVM with Robolectric, checks that the **+** button sits over its gap at three screen sizes, renders all three card styles, in light and dark themes, with and without animations and with empty data, then measures, lays out and draws the whole view tree. It catches crashes without a phone; it does not judge how the screens look. Needs JDK 8 and Maven; the libraries are downloaded once to `tests/ui/lib` (not committed).
 
 ## 5.0.1 (small update)
 - New launcher icon from the "Digital Wallet v5.0 · Keep Your Money" logo (adaptive icon for Android 8+, rounded icon for older versions). Source image and generator: `art/logo.jpg`, `art/make_icons.py`.

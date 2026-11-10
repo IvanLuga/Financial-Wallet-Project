@@ -638,19 +638,33 @@ final class Ui {
   }
 
   /**
-   * Wadah kartu 3D: gradasi, gelembung cahaya yang bergeser berlawanan arah kemiringan (kedalaman/paralaks), dan
-   * kilau yang menyapu. Kemiringan diatur lewat tilt(); rotasi view-nya sendiri diurus pemanggil.
+   * Kartu saldo bergaya kartu debit (5.0.2): warna dasar pekat, pita gelombang aksen di kanan bawah, motif
+   * lingkaran halus di kanan atas, lapisan kilap, tepi berkilau, dan kilau yang menyapu. Sisi belakang punya pita
+   * magnetik. Kemiringan diatur lewat tilt(); rotasi view-nya diurus pemanggil. Rasio = kartu ATM (85,6 × 54 mm).
    */
-  final class Glow extends FrameLayout {
-    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final int a, b;
-    private final float radius;
-    private float tx, ty, shine = -1;
-    private Shader bgShader, shineShader;
+  static final String[] CARD_NAMES = {"Biru Samudra", "Toska Senja", "Obsidian"};
+  static final String[] CARD_NOTES = {"Biru tua pekat + gelombang emas", "Toska + gelombang jingga", "Hitam doff + aksen perak"};
 
-    Glow(int a, int b, float radiusDp) {
+  final class BankCard extends FrameLayout {
+    static final int STYLES = 3;
+    private final int[][] cols = {
+      {0xFF1149B0, 0xFF061A4A, 0xFFF5B71E, 0xFFFFDC7C},
+      {0xFF008A93, 0xFF004650, 0xFFF26A1B, 0xFFFFA65E},
+      {0xFF2E323D, 0xFF08090C, 0xFFAEB5C2, 0xFFEEF1F6},
+    };
+    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final float radius;
+    private final int base1, base2, acc1, acc2;
+    private float tx, ty, shine = -1;
+    private boolean back;
+    private Shader bgShader, glossShader, shineShader, rimShader;
+    private final android.graphics.Path band = new android.graphics.Path(), shade = new android.graphics.Path(), line = new android.graphics.Path();
+
+    BankCard(int style, float radiusDp) {
       super(act);
-      this.a = a; this.b = b; radius = dp(radiusDp);
+      int[] c = cols[Math.max(0, Math.min(STYLES - 1, style))];
+      base1 = c[0]; base2 = c[1]; acc1 = c[2]; acc2 = c[3];
+      radius = dp(radiusDp);
       setWillNotDraw(false);
       setOutlineProvider(new ViewOutlineProvider() {
         @Override public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radius); }
@@ -659,9 +673,13 @@ final class Ui {
       cam(this);
     }
 
+    /** Warna aksen terang (untuk label di atas kartu). */
+    int accent() { return acc2; }
+
     void tilt(float x, float y) { tx = x; ty = y; invalidate(); }
 
-    /** Satu sapuan kilau dari kiri ke kanan. */
+    void setBack(boolean b) { back = b; invalidate(); }
+
     void sweep() {
       if (!animate) return;
       ValueAnimator s = ValueAnimator.ofFloat(0f, 1f);
@@ -674,24 +692,70 @@ final class Ui {
       s.start();
     }
 
+    @Override protected void onMeasure(int wSpec, int hSpec) {
+      super.onMeasure(wSpec, hSpec);
+      int min = Math.round(getMeasuredWidth() / 1.586f);
+      if (getMeasuredHeight() < min) super.onMeasure(wSpec, MeasureSpec.makeMeasureSpec(min, MeasureSpec.EXACTLY));
+    }
+
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
-      bgShader = new LinearGradient(0, 0, w, h, new int[]{a, blend(a, b, 0.55f), b}, null, Shader.TileMode.CLAMP);
-      shineShader = new LinearGradient(0, 0, dp(90), 0, new int[]{0x00FFFFFF, 0x38FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP);
+      bgShader = new LinearGradient(0, 0, w, h, base1, base2, Shader.TileMode.CLAMP);
+      glossShader = new LinearGradient(0, 0, w * 0.55f, h, new int[]{0x42FFFFFF, 0x0AFFFFFF, 0x00FFFFFF}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
+      shineShader = new LinearGradient(0, 0, dp(90), 0, new int[]{0x00FFFFFF, 0x3DFFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP);
+      rimShader = new LinearGradient(0, 0, 0, h, 0x66FFFFFF, 0x14FFFFFF, Shader.TileMode.CLAMP);
+      band.reset();
+      band.moveTo(w * 0.56f, h);
+      band.cubicTo(w * 0.72f, h * 0.70f, w * 0.84f, h * 0.84f, w, h * 0.34f);
+      band.lineTo(w, h);
+      band.close();
+      shade.reset();
+      shade.moveTo(w * 0.68f, h);
+      shade.cubicTo(w * 0.79f, h * 0.82f, w * 0.89f, h * 0.96f, w, h * 0.58f);
+      shade.lineTo(w, h);
+      shade.close();
+      line.reset();
+      line.moveTo(w * 0.50f, h);
+      line.cubicTo(w * 0.68f, h * 0.62f, w * 0.82f, h * 0.70f, w, h * 0.18f);
     }
 
     @Override protected void onDraw(Canvas c) {
       float w = getWidth(), h = getHeight();
+      if (bgShader == null) return;
+      p.setStyle(Paint.Style.FILL);
       p.setShader(bgShader);
       c.drawRect(0, 0, w, h, p);
       p.setShader(null);
-      float[][] orbs = {{0.86f, 0.10f, 0.42f, 1.0f}, {0.08f, 0.95f, 0.36f, 0.6f}, {0.62f, 0.72f, 0.20f, 1.5f}};
-      for (float[] o : orbs) {
-        p.setColor(0x16FFFFFF);
-        c.drawCircle(o[0] * w - tx * dp(18) * o[3], o[1] * h - ty * dp(18) * o[3], o[2] * w, p);
-      }
-      // Pantulan mengikuti kemiringan: seolah sumber cahaya tetap di tempat.
+      // Motif lingkaran konsentris (pengganti guilloche) di kanan atas.
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeWidth(Math.max(1, dp(1)));
       p.setColor(0x14FFFFFF);
-      c.drawCircle(w * (0.5f + tx * 0.5f), h * (0.5f + ty * 0.5f), w * 0.34f, p);
+      for (int i = 0; i < 7; i++) c.drawCircle(w * 0.98f, -h * 0.12f, w * (0.18f + 0.055f * i), p);
+      // Pita gelombang: aksen, lalu bayangan warna dasar di atasnya sehingga tersisa garis aksen bergelombang.
+      c.save();
+      c.translate(-tx * dp(6), -ty * dp(4)); // paralaks kecil: motif seolah di lapisan bawah
+      p.setStyle(Paint.Style.FILL);
+      float fa = back ? 0.28f : 1f; // sisi belakang: motif diredupkan agar angka rincian terbaca
+      p.setColor(alpha(acc1, 0.92f * fa));
+      c.drawPath(band, p);
+      p.setColor(alpha(base2, 0.94f * fa));
+      c.drawPath(shade, p);
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeWidth(dp(2.2f));
+      p.setColor(alpha(acc2, 0.85f * fa));
+      c.drawPath(line, p);
+      c.restore();
+      if (back) {
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xF2111317);
+        c.drawRect(0, dp(20), w, dp(62), p);
+      }
+      // Kilap kaca + pantulan yang mengikuti kemiringan.
+      p.setStyle(Paint.Style.FILL);
+      p.setShader(glossShader);
+      c.drawRect(0, 0, w, h, p);
+      p.setShader(null);
+      p.setColor(0x12FFFFFF);
+      c.drawCircle(w * (0.5f + tx * 0.5f), h * (0.5f + ty * 0.5f), w * 0.36f, p);
       if (shine >= 0 && shine < 1) {
         c.save();
         c.translate(-dp(120) + shine * (w + dp(200)), 0);
@@ -700,6 +764,44 @@ final class Ui {
         c.drawRect(0, 0, dp(90), h, p);
         p.setShader(null);
         c.restore();
+      }
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeWidth(dp(1.2f));
+      p.setShader(rimShader);
+      float in = dp(0.6f);
+      c.drawRoundRect(new RectF(in, in, w - in, h - in), radius - in, radius - in, p);
+      p.setShader(null);
+    }
+  }
+
+  /** Cip EMV emas + simbol nirsentuh, digambar (bukan gambar bitmap). */
+  final class Chip extends View {
+    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    Chip() { super(act); setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO); }
+
+    @Override protected void onDraw(Canvas c) {
+      float h = getHeight(), w = h * 1.35f, r = dp(6);
+      p.setStyle(Paint.Style.FILL);
+      p.setShader(new LinearGradient(0, 0, w, h, new int[]{0xFFF8E7A6, 0xFFD9AC3F, 0xFFB98A28}, null, Shader.TileMode.CLAMP));
+      c.drawRoundRect(new RectF(0, 0, w, h), r, r, p);
+      p.setShader(null);
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeWidth(dp(1.1f));
+      p.setColor(0x997A5512);
+      float x1 = w * 0.34f, x2 = w * 0.66f;
+      c.drawLine(0, h / 3, x1, h / 3, p); c.drawLine(0, h * 2 / 3, x1, h * 2 / 3, p);
+      c.drawLine(x2, h / 3, w, h / 3, p); c.drawLine(x2, h * 2 / 3, w, h * 2 / 3, p);
+      c.drawLine(x1, 0, x1, h, p); c.drawLine(x2, 0, x2, h, p);
+      c.drawRoundRect(new RectF(x1, h * 0.26f, x2, h * 0.74f), dp(3), dp(3), p);
+      // Simbol nirsentuh: tiga busur.
+      p.setColor(0xD9FFFFFF);
+      p.setStrokeWidth(dp(2));
+      p.setStrokeCap(Paint.Cap.ROUND);
+      float cx = w + dp(14), cy = h / 2;
+      for (int i = 1; i <= 3; i++) {
+        float rr = dp(4.5f) * i;
+        c.drawArc(new RectF(cx - rr, cy - rr, cx + rr, cy + rr), -40, 80, false, p);
       }
     }
   }

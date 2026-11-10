@@ -67,6 +67,8 @@ public class MainActivity extends Activity {
   private ImageView privacyButton, searchButton;
   private final LinearLayout[] navCells = new LinearLayout[5];
   private View navDot;
+  View navGap, navFab; // dibaca uji UI
+  private FrameLayout navWrap, navBar;
   private Ui.Aurora aurora;
   private TextView avatar;
   private final ImageView[] navIcons = new ImageView[5];
@@ -314,12 +316,14 @@ public class MainActivity extends Activity {
     });
 
     // Navigasi mengambang: kapsul kaca di atas konten, penanda aktif yang meluncur, tombol + menonjol di tengah.
-    FrameLayout navWrap = ui.frame();
+    navWrap = ui.frame();
+    navWrap.setElevation(ui.dp(20)); // selalu di atas konten (kartu beranimasi 3D sekalipun)
     navWrap.setClipChildren(false);
     navWrap.setClipToPadding(false);
     root.setClipChildren(false);
     FrameLayout bar = ui.frame();
-    bar.setBackground(ui.dark ? ui.stroke(Ui.alpha(ui.surface2, 0.96f), Ui.alpha(0xFFFFFFFF, 0.10f), 30) : ui.round(ui.surface, 30));
+    navBar = bar;
+    bar.setBackground(ui.dark ? ui.stroke(ui.surface2, Ui.alpha(0xFFFFFFFF, 0.10f), 30) : ui.round(ui.surface, 30));
     bar.setElevation(ui.dp(12));
     FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(Ui.MATCH, ui.dp(66), Gravity.BOTTOM);
     bp.setMargins(ui.dp(14), 0, ui.dp(14), ui.dp(12));
@@ -333,7 +337,7 @@ public class MainActivity extends Activity {
     String[] names = {"Beranda", "Wawasan", "Kontrol", "Rencana", "Proyeksi"};
     int[] icons = {R.drawable.ic_home, R.drawable.ic_insights, R.drawable.ic_shield, R.drawable.ic_event, R.drawable.ic_forecast};
     for (int pos = 0; pos < NAV_ORDER.length; pos++) {
-      if (pos == 2) nav.addView(new View(this), Ui.lp(ui.dp(68), 1)); // tempat tombol +
+      if (pos == 2) { navGap = new View(this); nav.addView(navGap, Ui.lp(ui.dp(68), 1)); } // tempat tombol +
       final int target = NAV_ORDER[pos];
       LinearLayout cell = ui.col();
       cell.setGravity(Gravity.CENTER);
@@ -351,11 +355,12 @@ public class MainActivity extends Activity {
     }
     // Posisi penanda baru diketahui setelah tata letak selesai (juga saat layar diputar).
     nav.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
-      public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) { if (r - l != or - ol) moveDot(false); }
+      public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) { placeFab(); if (r - l != or - ol) moveDot(false); }
     });
     FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(ui.dp(62), ui.dp(62), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
     fp.bottomMargin = ui.dp(28);
-    navWrap.addView(fab(), fp);
+    navFab = fab();
+    navWrap.addView(navFab, fp);
     root.addView(navWrap, new FrameLayout.LayoutParams(Ui.MATCH, ui.dp(104), Gravity.BOTTOM));
 
     snackBar = ui.row();
@@ -366,6 +371,16 @@ public class MainActivity extends Activity {
     FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(Ui.MATCH, Ui.WRAP, Gravity.BOTTOM);
     sp.setMargins(ui.dp(14), 0, ui.dp(14), ui.dp(108));
     root.addView(snackBar, sp);
+  }
+
+  /**
+   * Tombol + di atas celahnya. Celah ada di antara tab ke-2 dan ke-3 dari 5 (2 kiri, 3 kanan), jadi BUKAN di tengah
+   * layar; tombol yang dipaku di tengah (5.0.2 awal) menimpa tab Proyeksi.
+   */
+  private void placeFab() {
+    if (navGap == null || navGap.getWidth() == 0 || navWrap.getWidth() == 0) return;
+    float gapCenter = navBar.getLeft() + ((View) navGap.getParent()).getLeft() + navGap.getLeft() + navGap.getWidth() / 2f;
+    navFab.setTranslationX(gapCenter - navWrap.getWidth() / 2f);
   }
 
   private void moveDot(boolean animated) {
