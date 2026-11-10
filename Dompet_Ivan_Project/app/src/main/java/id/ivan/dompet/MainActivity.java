@@ -35,8 +35,8 @@ import java.util.Calendar;
 
 /** Kerangka aplikasi: header, navigasi bawah, tema, kunci PIN, menu pengaturan, dan ekspor/impor berkas. */
 public class MainActivity extends Activity {
-  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0.1";
-  static final int VERSION_CODE = 8;
+  static final String APP_NAME = "Dompet Ivan v5.0", VERSION = "5.0.2";
+  static final int VERSION_CODE = 9;
   static final int REQ_CSV = 1, REQ_PDF = 2, REQ_BACKUP = 3, REQ_RESTORE = 4, REQ_IMPORT = 5, REQ_TREE = 6, REQ_PNG = 7, REQ_NOTIF = 45;
   static final int TAB_HOME = 0, TAB_INSIGHT = 1, TAB_CONTROL = 2, TAB_PLAN = 3, TAB_PROJECT = 4;
   /** Urutan tampilan di navigasi bawah (nilai tab tetap demi kompatibilitas notifikasi lama). Tombol + di antara posisi 1 dan 2. */
@@ -66,7 +66,9 @@ public class MainActivity extends Activity {
   private LinearLayout monthBar;
   private ImageView privacyButton, searchButton;
   private final LinearLayout[] navCells = new LinearLayout[5];
-  private final View[] navPills = new View[5];
+  private View navDot;
+  private Ui.Aurora aurora;
+  private TextView avatar;
   private final ImageView[] navIcons = new ImageView[5];
   private final TextView[] navLabels = new TextView[5];
   private LinearLayout snackBar;
@@ -105,7 +107,7 @@ public class MainActivity extends Activity {
     }
     getWindow().setBackgroundDrawable(new ColorDrawable(ui.bg));
     getWindow().setStatusBarColor(ui.bg);
-    getWindow().setNavigationBarColor(ui.surface);
+    getWindow().setNavigationBarColor(ui.bg);
     int flags = 0;
     if (!dark) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
     if (!dark && Build.VERSION.SDK_INT >= 26) flags |= 0x00000010; // SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
@@ -245,6 +247,8 @@ public class MainActivity extends Activity {
   private void buildShell() {
     root = ui.frame();
     root.setBackgroundColor(ui.bg);
+    aurora = ui.new Aurora();
+    root.addView(aurora, new FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH));
     shell = ui.col();
     root.addView(shell, new FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH));
 
@@ -253,10 +257,24 @@ public class MainActivity extends Activity {
     shell.addView(head);
     LinearLayout top = ui.row();
     head.addView(top);
+    // Avatar = pintu menu (profil, akun, tema, cadangan); tombol ⋮ tetap ada di kanan bagi yang sudah terbiasa.
+    avatar = ui.label("👛", 17, Ui.onColor(ui.heroB));
+    avatar.setGravity(Gravity.CENTER);
+    avatar.setBackground(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{ui.heroA, ui.heroB}) {{ setShape(OVAL); }});
+    avatar.setContentDescription("Menu dan profil");
+    avatar.setElevation(ui.dp(3));
+    ui.click(avatar, new Runnable() { public void run() { settingsMenu(); } });
+    LinearLayout.LayoutParams ap = Ui.lp(ui.dp(44), ui.dp(44));
+    ap.rightMargin = ui.dp(12);
+    top.addView(avatar, ap);
     LinearLayout titles = ui.col();
     top.addView(titles, Ui.weight(1));
-    titleView = ui.title("Dompet Ivan", 24);
+    titleView = ui.title("Dompet Ivan", 21);
+    titleView.setSingleLine(true);
+    titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
     subtitleView = ui.text("", 12.5f, ui.muted);
+    subtitleView.setSingleLine(true);
+    subtitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
     titles.addView(titleView);
     titles.addView(subtitleView);
     searchButton = ui.iconButton(R.drawable.ic_search, ui.text, "Cari transaksi", new Runnable() { public void run() { forms.search(); } });
@@ -271,7 +289,8 @@ public class MainActivity extends Activity {
     mp.topMargin = ui.dp(8);
     mp.rightMargin = ui.dp(10);
     head.addView(monthBar, mp);
-    monthBar.setBackground(ui.round(ui.surface, 50));
+    monthBar.setBackground(ui.dark ? ui.stroke(Ui.alpha(ui.surface, 0.88f), Ui.alpha(0xFFFFFFFF, 0.09f), 50) : ui.round(ui.surface, 50));
+    if (!ui.dark) monthBar.setElevation(ui.dp(1.5f));
     ui.pad(monthBar, 4, 2, 4, 2);
     monthBar.addView(ui.iconButton(R.drawable.ic_left, ui.text, "Bulan sebelumnya", new Runnable() { public void run() { shiftMonth(-1); } }));
     monthLabel = ui.label("", 15, ui.text);
@@ -285,67 +304,106 @@ public class MainActivity extends Activity {
     scroll.setVerticalScrollBarEnabled(false);
     shell.addView(scroll, new LinearLayout.LayoutParams(Ui.MATCH, 0, 1f));
     body = ui.col();
-    ui.pad(body, 16, 12, 16, 28);
+    ui.pad(body, 16, 12, 16, 118); // ruang untuk navigasi mengambang
     scroll.addView(body);
+    scroll.setOnScrollChangeListener(new View.OnScrollChangeListener() {
+      public void onScrollChange(View v, int x, int y, int ox, int oy) {
+        aurora.scrolled(y);
+        home.parallax(y);
+      }
+    });
 
-    // Navigasi bawah dengan tombol tambah di tengah.
-    LinearLayout nav = ui.row();
-    nav.setBackgroundColor(ui.surface);
-    nav.setElevation(ui.dp(12));
-    ui.pad(nav, 6, 6, 6, 8);
-    shell.addView(nav, Ui.lp(Ui.MATCH, Ui.WRAP));
+    // Navigasi mengambang: kapsul kaca di atas konten, penanda aktif yang meluncur, tombol + menonjol di tengah.
+    FrameLayout navWrap = ui.frame();
+    navWrap.setClipChildren(false);
+    navWrap.setClipToPadding(false);
+    root.setClipChildren(false);
+    FrameLayout bar = ui.frame();
+    bar.setBackground(ui.dark ? ui.stroke(Ui.alpha(ui.surface2, 0.96f), Ui.alpha(0xFFFFFFFF, 0.10f), 30) : ui.round(ui.surface, 30));
+    bar.setElevation(ui.dp(12));
+    FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(Ui.MATCH, ui.dp(66), Gravity.BOTTOM);
+    bp.setMargins(ui.dp(14), 0, ui.dp(14), ui.dp(12));
+    navWrap.addView(bar, bp);
+    navDot = new View(this);
+    navDot.setBackground(ui.round(ui.primarySoft, 18));
+    bar.addView(navDot, new FrameLayout.LayoutParams(ui.dp(54), ui.dp(34), Gravity.TOP | Gravity.LEFT));
+    navDot.setTranslationY(ui.dp(6));
+    final LinearLayout nav = ui.row();
+    bar.addView(nav, new FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH));
     String[] names = {"Beranda", "Wawasan", "Kontrol", "Rencana", "Proyeksi"};
     int[] icons = {R.drawable.ic_home, R.drawable.ic_insights, R.drawable.ic_shield, R.drawable.ic_event, R.drawable.ic_forecast};
     for (int pos = 0; pos < NAV_ORDER.length; pos++) {
-      if (pos == 2) nav.addView(fab(), Ui.lp(ui.dp(64), ui.dp(56)));
-      final int i = NAV_ORDER[pos];
-      final int target = i;
+      if (pos == 2) nav.addView(new View(this), Ui.lp(ui.dp(68), 1)); // tempat tombol +
+      final int target = NAV_ORDER[pos];
       LinearLayout cell = ui.col();
       cell.setGravity(Gravity.CENTER);
-      FrameLayout iconWrap = ui.frame();
-      View pill = new View(this);
-      pill.setBackground(ui.round(ui.primarySoft, 20));
-      iconWrap.addView(pill, new FrameLayout.LayoutParams(ui.dp(50), ui.dp(30), Gravity.CENTER));
-      ImageView ic = ui.icon(icons[i], ui.muted, 22);
-      iconWrap.addView(ic, new FrameLayout.LayoutParams(ui.dp(22), ui.dp(22), Gravity.CENTER));
-      cell.addView(iconWrap, Ui.lp(ui.dp(50), ui.dp(30)));
-      TextView label = ui.label(names[i], 10.5f, ui.muted);
+      ImageView ic = ui.icon(icons[target], ui.muted, 22);
+      cell.addView(ic, Ui.lp(ui.dp(22), ui.dp(22)));
+      ui.gap(cell, 8);
+      TextView label = ui.label(names[target], 10.5f, ui.muted);
       label.setGravity(Gravity.CENTER);
       label.setSingleLine(true);
       cell.addView(label);
-      cell.setContentDescription(names[i]);
-      cell.setBackground(ui.ripple(null, Ui.alpha(ui.primary, 0.15f)));
+      cell.setContentDescription(names[target]);
       ui.click(cell, new Runnable() { public void run() { go(target); } });
-      nav.addView(cell, new LinearLayout.LayoutParams(0, ui.dp(56), 1));
-      navCells[i] = cell; navPills[i] = pill; navIcons[i] = ic; navLabels[i] = label;
+      nav.addView(cell, new LinearLayout.LayoutParams(0, Ui.MATCH, 1));
+      navCells[target] = cell; navIcons[target] = ic; navLabels[target] = label;
     }
+    // Posisi penanda baru diketahui setelah tata letak selesai (juga saat layar diputar).
+    nav.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+      public void onLayoutChange(View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) { if (r - l != or - ol) moveDot(false); }
+    });
+    FrameLayout.LayoutParams fp = new FrameLayout.LayoutParams(ui.dp(62), ui.dp(62), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+    fp.bottomMargin = ui.dp(28);
+    navWrap.addView(fab(), fp);
+    root.addView(navWrap, new FrameLayout.LayoutParams(Ui.MATCH, ui.dp(104), Gravity.BOTTOM));
 
     snackBar = ui.row();
     snackBar.setVisibility(View.GONE);
-    snackBar.setBackground(ui.round(ui.dark ? 0xFF2B3E47 : 0xFF15252E, 16));
-    snackBar.setElevation(ui.dp(8));
+    snackBar.setBackground(ui.round(ui.dark ? 0xFF2A3654 : 0xFF101828, 16));
+    snackBar.setElevation(ui.dp(16));
     ui.pad(snackBar, 16, 10, 8, 10);
     FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(Ui.MATCH, Ui.WRAP, Gravity.BOTTOM);
-    sp.setMargins(ui.dp(14), 0, ui.dp(14), ui.dp(86));
+    sp.setMargins(ui.dp(14), 0, ui.dp(14), ui.dp(108));
     root.addView(snackBar, sp);
+  }
+
+  private void moveDot(boolean animated) {
+    View cell = navCells[tab];
+    if (cell == null || cell.getWidth() == 0) return;
+    float x = cell.getLeft() + (cell.getWidth() - navDot.getWidth()) / 2f;
+    navDot.animate().cancel();
+    if (animated && ui.animate) navDot.animate().translationX(x).setDuration(380).setInterpolator(new android.view.animation.OvershootInterpolator(1.6f)).start();
+    else navDot.setTranslationX(x);
   }
 
   private View fab() {
     FrameLayout wrap = ui.frame();
-    final TextView plus = new TextView(this);
-    plus.setBackground(ui.ripple(ui.gradient(ui.primary, ui.dark ? 0xFF1F8C98 : 0xFF0A6F8A, 18), 0x40FFFFFF));
+    wrap.setClipChildren(false);
+    wrap.setElevation(ui.dp(13)); // urutan Z antar-saudara: tanpa ini bilah navigasi (elevasi 12) menutupi tombol
+    // Cincin cahaya berdenyut di belakang tombol.
+    final View halo = new View(this);
+    halo.setBackground(new android.graphics.drawable.GradientDrawable() {{ setShape(OVAL); setColor(Ui.alpha(ui.primary, 0.35f)); }});
+    wrap.addView(halo, new FrameLayout.LayoutParams(ui.dp(58), ui.dp(58), Gravity.CENTER));
+    ui.loop(halo, 2400, 5, new Ui.Tick() {
+      public void at(float t) { halo.setScaleX(1f + 0.45f * t); halo.setScaleY(1f + 0.45f * t); halo.setAlpha(1f - t); }
+    });
+    final View plus = new View(this);
+    plus.setBackground(ui.ripple(new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, new int[]{ui.heroA, ui.heroB}) {{ setShape(OVAL); }}, 0x40FFFFFF));
     plus.setElevation(ui.dp(6));
     plus.setContentDescription("Catat transaksi");
-    wrap.addView(plus, new FrameLayout.LayoutParams(ui.dp(54), ui.dp(48), Gravity.CENTER));
-    ImageView ic = ui.icon(R.drawable.ic_add, Color.WHITE, 28);
-    ic.setElevation(ui.dp(7));
-    wrap.addView(ic, new FrameLayout.LayoutParams(ui.dp(28), ui.dp(28), Gravity.CENTER));
-    final ImageView icon = ic;
+    wrap.addView(plus, new FrameLayout.LayoutParams(ui.dp(58), ui.dp(58), Gravity.CENTER));
+    final ImageView icon = ui.icon(R.drawable.ic_add, Color.WHITE, 28);
+    icon.setElevation(ui.dp(7));
+    wrap.addView(icon, new FrameLayout.LayoutParams(ui.dp(28), ui.dp(28), Gravity.CENTER));
     ui.click(plus, new Runnable() {
       public void run() {
-        if (ui.animate) icon.animate().rotationBy(90).setDuration(260).start();
+        if (ui.animate) icon.animate().rotationBy(180).setDuration(360).setInterpolator(new android.view.animation.OvershootInterpolator(2f)).start();
         forms.tx(null);
       }
+    });
+    plus.setOnLongClickListener(new View.OnLongClickListener() {
+      public boolean onLongClick(View v) { v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); forms.templates(); return true; }
     });
     return wrap;
   }
@@ -379,10 +437,16 @@ public class MainActivity extends Activity {
     }
     if (transition) {
       scroll.scrollTo(0, 0);
+      aurora.drift();
       if (ui.animate) {
+        // Halaman berayun masuk seperti pintu: berputar pada sisi datangnya (3D), bukan sekadar bergeser.
+        ui.cam(body);
+        body.setPivotX(dir > 0 ? body.getWidth() : 0);
+        body.setPivotY(scroll.getHeight() / 2f);
         body.setAlpha(0f);
-        body.setTranslationX(ui.dp(28) * dir);
-        body.animate().alpha(1f).translationX(0).setDuration(260).setInterpolator(new DecelerateInterpolator(1.5f)).start();
+        body.setRotationY(-16f * dir);
+        body.setTranslationX(ui.dp(36) * dir);
+        body.animate().alpha(1f).rotationY(0).translationX(0).setDuration(340).setInterpolator(new DecelerateInterpolator(1.7f)).start();
       }
     }
   }
@@ -399,6 +463,7 @@ public class MainActivity extends Activity {
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         String greet = h < 11 ? "Selamat pagi" : h < 15 ? "Selamat siang" : h < 19 ? "Selamat sore" : "Selamat malam";
         titleView.setText(name.isEmpty() ? greet : greet + ", " + name);
+        avatar.setText(name.isEmpty() ? "👛" : Ui.initials(name));
         subtitleView.setText(Fmt.DAYS[Fmt.weekday(today)] + ", " + Fmt.day(today) + " " + Fmt.monthName(Fmt.period(today)));
     }
     boolean showMonth = tab == TAB_HOME || tab == TAB_CONTROL || (tab == TAB_INSIGHT && insights.range == 0);
@@ -420,13 +485,12 @@ public class MainActivity extends Activity {
       navIcons[i].getDrawable().setTint(on ? ui.primary : ui.muted);
       navLabels[i].setTextColor(on ? ui.primary : ui.muted);
       navLabels[i].setTypeface(on ? ui.bold : ui.medium);
-      if (on && navPills[i].getVisibility() != View.VISIBLE && ui.animate) {
-        navPills[i].setScaleX(0.3f);
-        navPills[i].setAlpha(0f);
-        navPills[i].animate().scaleX(1f).alpha(1f).setDuration(260).setInterpolator(new DecelerateInterpolator()).start();
-      }
-      navPills[i].setVisibility(on ? View.VISIBLE : View.INVISIBLE);
+      // Ikon aktif terangkat dan sedikit membesar.
+      float sc = on ? 1.15f : 1f;
+      if (ui.animate) navIcons[i].animate().scaleX(sc).scaleY(sc).translationY(on ? -ui.dp(1) : 0).setDuration(260).setInterpolator(new android.view.animation.OvershootInterpolator(3f)).start();
+      else { navIcons[i].setScaleX(sc); navIcons[i].setScaleY(sc); }
     }
+    moveDot(true);
   }
 
   void shiftMonth(int n) {
@@ -649,8 +713,9 @@ public class MainActivity extends Activity {
     lock.setBackgroundColor(ui.bg);
     lock.setGravity(Gravity.CENTER_HORIZONTAL);
     ui.pad(lock, 30, 70, 30, 30);
-    TextView logo = ui.badge("👛", "D", ui.primary, 76);
-    lock.addView(logo);
+    final Ui.Coin logo = ui.new Coin(Fmt.cur.symbol);
+    lock.addView(logo, Ui.lp(ui.dp(96), ui.dp(96)));
+    ui.click(logo, new Runnable() { public void run() { logo.spin(2, 1400); } });
     ui.gap(lock, 18);
     lock.addView(ui.title("Dompet Ivan terkunci", 22));
     final TextView msg = ui.text(fingerprintOn() && Fingerprint.ready(this) ? "👆 Sentuh sensor sidik jari atau masukkan PIN" : "Masukkan PIN " + len + " digit", 14, ui.muted);
@@ -684,6 +749,7 @@ public class MainActivity extends Activity {
           LinearLayout.LayoutParams p = Ui.lp(ui.dp(16), ui.dp(16));
           p.leftMargin = ui.dp(8); p.rightMargin = ui.dp(8);
           dots.addView(d, p);
+          if (i == entry.length() - 1) ui.pop(d);
         }
       }
     };
@@ -699,7 +765,9 @@ public class MainActivity extends Activity {
         TextView key = ui.label(k, 24, ui.text);
         key.setGravity(Gravity.CENTER);
         if (!k.isEmpty()) {
-          key.setBackground(ui.ripple(ui.round(ui.surface, 40), Ui.alpha(ui.primary, 0.2f)));
+          key.setBackground(ui.ripple(ui.dark ? ui.stroke(Ui.alpha(ui.surface, 0.9f), Ui.alpha(0xFFFFFFFF, 0.09f), 40) : ui.round(ui.surface, 40), Ui.alpha(ui.primary, 0.2f)));
+          if (!ui.dark) key.setElevation(ui.dp(1.5f));
+          ui.enter(key, r);
           ui.click(key, new Runnable() {
             public void run() {
               long wait = prefs.getLong("pin_wait", 0) - System.currentTimeMillis();

@@ -109,7 +109,12 @@ final class Control {
     String today = Fmt.today();
     int days = Fmt.cycleDays(period);
     int day = period.equals(Fmt.cycle(today)) ? Fmt.cycleIndex(today) : period.compareTo(Fmt.cycle(today)) < 0 ? days : 1;
-    return Analytics.pace(s.monthLimit, spentMonth(db, period), day, days, paceCurve(db, period));
+    // Transaksi "tidak biasa" (≥ ambang yang sama dengan peringatan transaksi besar) dihitung sekali, tidak diekstrapolasi.
+    String from = Fmt.cycleStart(period), to = Fmt.cycleEnd(period);
+    long threshold = Analytics.unusualThreshold(db.expenseAmounts(Fmt.addDays(from, -90), Fmt.addDays(from, -1)), s.unusualMin);
+    long oneOff = 0;
+    for (long v : db.expenseAmounts(from, to)) if (v >= threshold) oneOff += v;
+    return Analytics.pace(s.monthLimit, spentMonth(db, period), day, days, paceCurve(db, period), oneOff);
   }
 
   private static int crossed(long used, long limit, int[] levels) {
@@ -322,7 +327,7 @@ final class Control {
       String prev = Fmt.addMonths(Fmt.cycle(today), -1);
       if (once(c, "mr|" + prev)) {
         ArrayList<Tx> l = db.month(prev);
-        long in = Analytics.sum(l, Model.INCOME), out = Analytics.sum(l, Model.EXPENSE);
+        long in = Analytics.income(l), out = Analytics.sum(l, Model.EXPENSE);
         if (!l.isEmpty())
           Notifier.post(c, Notifier.id("monthly"), Notifier.CH_SUMMARY, "Rapor " + Fmt.monthName(prev) + " siap",
             "Masuk " + Notifier.money(c, in) + " · Keluar " + Notifier.money(c, out) + " · Bersih " + (Notifier.hidden(c) ? Fmt.masked() : Fmt.signed(in - out)) + ". Ketuk untuk melihat rapor.", 1, 0xFF3D6FEC, "wrap_month");

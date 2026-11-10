@@ -5,3 +5,7 @@ signing-password.txt
 # Hasil build
 Dompet_Ivan_Project/build/
 *.idsig
+# Pustaka uji UI (diunduh oleh tests/run_ui_smoke.sh)
+Dompet_Ivan_Project/tests/ui/lib/
+# APK hasil build lokal (rilis ada di releases/)
+Dompet_Ivan_Project/*.apk

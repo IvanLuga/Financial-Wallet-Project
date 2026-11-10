@@ -26,6 +26,13 @@ final class Analytics {
     return s;
   }
 
+  /** Pemasukan nyata: tanpa transfer dan tanpa "Saldo awal" (uang lama yang baru dicatat, bukan penghasilan). */
+  static long income(List<Tx> l) {
+    long s = 0;
+    for (Tx t : l) if (t.type == Model.INCOME && Forecast.flow(t)) s += t.amount;
+    return s;
+  }
+
   static LinkedHashMap<String, Long> byCategory(List<Tx> l, int type) {
     HashMap<String, Long> m = new HashMap<>();
     for (Tx t : l) if (t.type == type) add(m, t.cat, t.amount);
@@ -112,6 +119,25 @@ final class Analytics {
     else if (p.projected > limit * 95 / 100) p.status = 1;
     else p.status = 0;
     p.personal = true;
+    return p;
+  }
+
+  /**
+   * 5.0.2: seperti pace(...), tetapi pembelian besar sekali (oneOff, mis. bayar kos/beli HP) tidak dikalikan
+   * sisa hari. Proyeksi = oneOff + belanja biasa yang diekstrapolasi. Tanpa ini, satu transaksi besar di awal
+   * siklus membuat proyeksi melonjak dan status "Boros" palsu.
+   */
+  static Pace pace(long limit, long spent, int day, int days, double[] curve, long oneOff) {
+    Pace p = pace(limit, spent, day, days, curve);
+    long big = Math.max(0, Math.min(oneOff, spent));
+    if (big == 0 || limit <= 0) return p;
+    long regular = spent - big;
+    double f = p.personal ? curveAt(curve, (double) p.day / p.days) : (double) p.day / p.days;
+    p.projected = big + Math.round(regular / f);
+    if (spent >= limit) p.status = 3;
+    else if (p.day >= 3 && p.projected > limit * 11 / 10) p.status = 2;
+    else if (p.projected > limit * 95 / 100) p.status = 1;
+    else p.status = 0;
     return p;
   }
 
@@ -247,6 +273,8 @@ final class Analytics {
     String from, to, prevFrom, prevTo, label;
     int days, elapsed, noSpendDays, txCount, expenseCount, smallCount, biggestDay = -1;
     long income, expense, net, prevIncome, prevExpense, avgDaily, smallTotal;
+    /** Total "Saldo awal" pada periode ini — ditampilkan terpisah, tidak dihitung sebagai pemasukan. */
+    long opening;
     double savingsRate;
     LinkedHashMap<String, Long> byCat, prevByCat, incByCat;
     long[] dailyExp, dailyInc;
@@ -275,16 +303,18 @@ final class Analytics {
     else if (today.compareTo(to) > 0) r.elapsed = r.days;
     else r.elapsed = Fmt.daysBetween(from, today) + 1;
 
-    r.income = sum(cur, Model.INCOME);
+    r.income = income(cur);
+    r.opening = sum(cur, Model.INCOME) - r.income;
     r.expense = sum(cur, Model.EXPENSE);
     r.net = r.income - r.expense;
-    r.prevIncome = sum(prev, Model.INCOME);
+    r.prevIncome = income(prev);
     r.prevExpense = sum(prev, Model.EXPENSE);
     r.savingsRate = r.income > 0 ? (double) r.net / r.income : 0;
     r.avgDaily = r.expense / Math.max(1, r.elapsed == 0 ? r.days : r.elapsed);
     r.byCat = byCategory(cur, Model.EXPENSE);
     r.prevByCat = byCategory(prev, Model.EXPENSE);
     r.incByCat = byCategory(cur, Model.INCOME);
+    r.incByCat.remove(Forecast.OPENING);
     r.dailyExp = new long[r.days];
     r.dailyInc = new long[r.days];
 
@@ -298,7 +328,7 @@ final class Analytics {
       if (t.type == Model.EXPENSE) {
         r.expenseCount++;
         r.dailyExp[idx] += t.amount;
-        r.weekdayTotal[Fmt.weekday(t.date)] += t.amount;
+        if (idx < r.elapsed) r.weekdayTotal[Fmt.weekday(t.date)] += t.amount; // pembagi (weekdayDays) juga hanya hari berjalan
         expenses.add(t);
         if (t.amount < Fmt.th(50_000)) { r.smallCount++; r.smallTotal += t.amount; }
         String key = t.note.trim().toLowerCase(Locale.ROOT);
@@ -307,7 +337,7 @@ final class Analytics {
           if (s == null) { s = new NoteStat(); s.note = t.note.trim(); notes.put(key, s); }
           s.total += t.amount; s.count++;
         }
-      } else r.dailyInc[idx] += t.amount;
+      } else if (Forecast.flow(t)) r.dailyInc[idx] += t.amount;
     }
     int counted = r.elapsed == 0 ? 0 : r.elapsed;
     long best = 0;
@@ -365,7 +395,7 @@ final class Analytics {
     long[][] out = new long[2][n];
     String start = Fmt.addMonths(endPeriod, -(n - 1));
     for (Tx t : all) {
-      if (t.type == Model.TRANSFER || t.date.length() < 7) continue;
+      if (!Forecast.flow(t) || t.date.length() < 7) continue;
       int i = monthsBetween(start, Fmt.cycle(t.date));
       if (i < 0 || i >= n) continue;
       out[t.type == Model.INCOME ? 0 : 1][i] += t.amount;
@@ -380,6 +410,8 @@ final class Analytics {
       r.insights = out;
       return;
     }
+    if (r.opening > 0)
+      out.add(new Insight(INFO, "🏦", "Saldo awal " + Fmt.rp(r.opening) + " tidak dihitung pemasukan", "Saldo awal adalah uang lama yang baru dicatat, jadi tidak ikut rasio tabungan dan skor."));
     if (r.income > 0 && r.expense > r.income)
       out.add(new Insight(BAD, "⚠️", "Pengeluaran melebihi pemasukan", "Defisit " + Fmt.rp(r.expense - r.income) + " pada " + r.label + ". Tunda belanja yang tidak wajib atau naikkan pemasukan."));
     else if (r.income > 0 && r.savingsRate >= 0.2)

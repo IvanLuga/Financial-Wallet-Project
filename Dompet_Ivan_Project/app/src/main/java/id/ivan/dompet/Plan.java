@@ -30,7 +30,7 @@ final class Plan {
     String[] names = {"Tagihan", "Target", "Utang", "Wishlist"};
     for (int i = 0; i < 4; i++) {
       final int v = i;
-      TextView c = ui.label(names[i], 13, sub == i ? android.graphics.Color.WHITE : ui.muted);
+      TextView c = ui.label(names[i], 13, sub == i ? Ui.onColor(ui.primary) : ui.muted);
       c.setGravity(android.view.Gravity.CENTER);
       ui.pad(c, 4, 9, 4, 9);
       c.setBackground(sub == i ? ui.round(ui.primary, 50) : ui.ripple(null, Ui.alpha(ui.primary, 0.15f)));
@@ -245,7 +245,7 @@ final class Plan {
       String info;
       if (done) info = "✓ Target tercapai!";
       else if (!g.deadline.isEmpty()) {
-        int months = Math.max(1, Analytics.monthsBetween(Fmt.period(today), Fmt.period(g.deadline)));
+        int months = Fmt.monthsLeft(today, g.deadline);
         int days = Fmt.daysBetween(today, g.deadline);
         info = days < 0 ? "Tenggat " + Fmt.dayLabel(g.deadline) + " sudah lewat · kurang " + a.money(g.target - g.saved)
           : "Tenggat " + Fmt.dayLabel(g.deadline) + " · perlu ≈ " + a.money((g.target - g.saved) / months) + "/bulan";

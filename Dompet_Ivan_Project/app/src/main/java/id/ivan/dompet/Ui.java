@@ -7,8 +7,12 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -23,6 +27,7 @@ import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
@@ -53,13 +58,13 @@ final class Ui {
     this.act = act; this.dark = dark; this.animate = animate;
     density = act.getResources().getDisplayMetrics().density;
     if (dark) {
-      bg = 0xFF0E171C; surface = 0xFF17242B; surface2 = 0xFF203038; text = 0xFFE8F0F2; muted = 0xFF93A7AF; faint = 0xFF5D727A;
-      divider = 0xFF26363E; primary = 0xFF2BB5A8; primarySoft = 0xFF16393A; blue = 0xFF6E9BFF; green = 0xFF3CC48F; red = 0xFFFF7A70;
-      gold = 0xFFF0B04A; purple = 0xFFB18CFF; heroA = 0xFF0F3B40; heroB = 0xFF13706A;
+      bg = 0xFF070B14; surface = 0xFF121A2B; surface2 = 0xFF1D2840; text = 0xFFEEF2FF; muted = 0xFF9BA8C4; faint = 0xFF64728F;
+      divider = 0xFF263352; primary = 0xFF2DD4BF; primarySoft = 0xFF123B45; blue = 0xFF6EA8FF; green = 0xFF34D399; red = 0xFFFF7A85;
+      gold = 0xFFFBBF4A; purple = 0xFFA78BFA; heroA = 0xFF0C7480; heroB = 0xFF5B3FD6;
     } else {
-      bg = 0xFFF2F5F7; surface = 0xFFFFFFFF; surface2 = 0xFFEEF2F4; text = 0xFF15252E; muted = 0xFF62747C; faint = 0xFF9AAAB1;
-      divider = 0xFFE3E9EC; primary = 0xFF0C8A82; primarySoft = 0xFFDDF2EF; blue = 0xFF3D6FEC; green = 0xFF168A68; red = 0xFFD2463E;
-      gold = 0xFFD98A12; purple = 0xFF8257E5; heroA = 0xFF113A42; heroB = 0xFF128079;
+      bg = 0xFFF3F5FB; surface = 0xFFFFFFFF; surface2 = 0xFFEAEEF7; text = 0xFF101828; muted = 0xFF5B667E; faint = 0xFF98A2B8;
+      divider = 0xFFE1E6F0; primary = 0xFF0B857D; primarySoft = 0xFFD9F3EF; blue = 0xFF2F6BEB; green = 0xFF12806A; red = 0xFFD43F4A;
+      gold = 0xFFB96F06; purple = 0xFF7C4DE8; heroA = 0xFF0A7A80; heroB = 0xFF5B3FD6;
     }
     palette = new int[]{primary, blue, purple, gold, red, dark ? 0xFF8AA4B0 : 0xFF6F8C99, green, dark ? 0xFFFF8FC2 : 0xFFD9488F};
   }
@@ -152,9 +157,16 @@ final class Ui {
     v.setOnTouchListener(new View.OnTouchListener() {
       public boolean onTouch(View x, MotionEvent e) {
         if (!animate) return false;
-        if (e.getAction() == MotionEvent.ACTION_DOWN) x.animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start();
-        else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL)
-          x.animate().scaleX(1f).scaleY(1f).setDuration(160).setInterpolator(new OvershootInterpolator(2f)).start();
+        if (e.getAction() == MotionEvent.ACTION_DOWN) {
+          float w = Math.max(1, x.getWidth()), h = Math.max(1, x.getHeight());
+          if (w > dp(220)) {
+            // Kartu lebar: miring 3D ke titik sentuh (kartu tinggi dimiringkan lebih sedikit agar tepinya tidak melompat).
+            float max = 5f * Math.min(1f, dp(150) / h);
+            cam(x);
+            x.animate().rotationY((e.getX() / w - .5f) * 2 * max).rotationX(-(e.getY() / h - .5f) * 2 * max).scaleX(0.985f).scaleY(0.985f).setDuration(110).start();
+          } else x.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start();
+        } else if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL)
+          x.animate().rotationX(0).rotationY(0).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(new OvershootInterpolator(2.2f)).start();
         return false;
       }
     });
@@ -165,10 +177,20 @@ final class Ui {
     v.setGravity(Gravity.CENTER);
     pad(v, 16, 12, 16, 12);
     v.setMinHeight(dp(48));
-    v.setBackground(ripple(round(color, 16), 0x40FFFFFF));
+    v.setBackground(ripple(gradient(color, blend(color, dark ? 0xFFFFFFFF : 0xFF000000, dark ? 0.16f : 0.14f), 16), 0x40FFFFFF));
+    v.setTextColor(onColor(color));
     click(v, r);
     return v;
   }
+
+  /** Teks di atas warna pekat: putih, atau gelap bila warnanya terang (kontras ≥ 4,5:1 di tema gelap). */
+  static int onColor(int c) {
+    double l = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255;
+    return l > 0.6 ? 0xFF06121C : Color.WHITE;
+  }
+
+  /** Jarak kamera agar rotasi 3D tidak terdistorsi berlebihan/terpotong. */
+  void cam(View v) { v.setCameraDistance(density * 9000); }
 
   TextView outline(String label, int color, Runnable r) {
     TextView v = label(label, 14f, color);
@@ -189,7 +211,7 @@ final class Ui {
   }
 
   TextView chip(String label, boolean selected, int color) {
-    TextView v = label(label, 13f, selected ? Color.WHITE : text);
+    TextView v = label(label, 13f, selected ? onColor(color) : text);
     v.setGravity(Gravity.CENTER);
     pad(v, 13, 8, 13, 8);
     v.setSingleLine(true);
@@ -199,8 +221,9 @@ final class Ui {
 
   LinearLayout card(LinearLayout parent) {
     LinearLayout v = col();
-    v.setBackground(dark ? stroke(surface, divider, 22) : round(surface, 22));
-    if (!dark) v.setElevation(dp(1.2f));
+    // Kaca: di tema gelap sedikit tembus pandang agar cahaya aurora latar terlihat samar.
+    v.setBackground(dark ? stroke(alpha(surface, 0.88f), alpha(0xFFFFFFFF, 0.09f), 24) : round(surface, 24));
+    if (!dark) v.setElevation(dp(2f));
     pad(v, 18, 16, 18, 16);
     LinearLayout.LayoutParams p = lp(MATCH, WRAP);
     p.bottomMargin = dp(12);
@@ -302,9 +325,13 @@ final class Ui {
 
   void enter(View v, int index) {
     if (!animate) return;
+    // Muncul seperti kartu yang ditegakkan: rebah ke belakang (rotasi X) lalu berdiri sambil naik.
+    cam(v);
     v.setAlpha(0f);
-    v.setTranslationY(dp(14));
-    v.animate().alpha(1f).translationY(0).setStartDelay(Math.min(index, 8) * 35L).setDuration(320).setInterpolator(new DecelerateInterpolator(1.6f)).start();
+    v.setTranslationY(dp(26));
+    v.setRotationX(-16f);
+    v.setScaleX(0.96f); v.setScaleY(0.96f);
+    v.animate().alpha(1f).translationY(0).rotationX(0).scaleX(1f).scaleY(1f).setStartDelay(Math.min(index, 8) * 45L).setDuration(420).setInterpolator(new DecelerateInterpolator(1.8f)).start();
   }
 
   void countUp(final TextView t, final long to, final Money f) {
@@ -354,8 +381,12 @@ final class Ui {
       p.setColor(surface2);
       c.drawRoundRect(new RectF(0, 0, w, h), r, r, p);
       if (shown > 0) {
-        p.setColor(color);
-        c.drawRoundRect(new RectF(0, 0, Math.max(h, w * shown), h), r, r, p);
+        float end = Math.max(h, w * shown);
+        p.setShader(new LinearGradient(0, 0, end, 0, blend(color, dark ? 0xFF000000 : 0xFFFFFFFF, 0.25f), color, Shader.TileMode.CLAMP));
+        c.drawRoundRect(new RectF(0, 0, end, h), r, r, p);
+        p.setShader(null);
+        p.setColor(0x66FFFFFF);
+        c.drawCircle(end - r, r, r * 0.45f, p);
       }
       if (marker >= 0 && marker <= 1) {
         p.setColor(text);
@@ -424,8 +455,9 @@ final class Ui {
       LinearLayout root = col();
       GradientDrawable g = new GradientDrawable();
       g.setColor(surface);
-      float r = dp(26);
+      float r = dp(30);
       g.setCornerRadii(new float[]{r, r, r, r, 0, 0, 0, 0});
+      if (dark) g.setStroke(Math.max(1, dp(1)), alpha(0xFFFFFFFF, 0.08f));
       root.setBackground(g);
       pad(root, 20, 10, 20, 18);
       View handle = new View(act);
@@ -451,7 +483,7 @@ final class Ui {
         w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         w.setGravity(Gravity.BOTTOM);
         w.setLayout(MATCH, WRAP);
-        w.setDimAmount(0.5f);
+        w.setDimAmount(0.6f);
         w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
         if (animate) w.setWindowAnimations(android.R.style.Animation_InputMethod);
@@ -520,4 +552,216 @@ final class Ui {
   }
 
   FrameLayout frame() { return new FrameLayout(act); }
+
+  // ---------------- 5.0.2: animasi berulang, latar aurora, kartu 3D, koin 3D ----------------
+
+  interface Tick { void at(float t); }
+
+  /** Animasi 0→1 yang hanya hidup selama view terpasang (otomatis berhenti saat layar diganti). repeat < 0 = terus. */
+  void loop(View v, final long ms, final int repeat, final Tick tick) {
+    if (!animate) return;
+    v.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+      ValueAnimator a;
+      public void onViewAttachedToWindow(View x) {
+        a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(ms);
+        a.setInterpolator(new android.view.animation.LinearInterpolator());
+        a.setRepeatCount(repeat < 0 ? ValueAnimator.INFINITE : repeat);
+        a.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+          public void onAnimationUpdate(ValueAnimator q) { tick.at((Float) q.getAnimatedValue()); }
+        });
+        a.start();
+      }
+      public void onViewDetachedFromWindow(View x) { if (a != null) { a.cancel(); a = null; } }
+    });
+  }
+
+  /** Latar "aurora": tiga gumpalan cahaya lembut yang bergeser saat berpindah layar dan saat menggulir (paralaks). */
+  final class Aurora extends View {
+    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final int[] cols = {primary, purple, blue};
+    private final Shader[] sh = new Shader[3];
+    private float t, scroll, rad;
+    private ValueAnimator run;
+    private final Shader fadeTop = new LinearGradient(0, 0, 0, dp(96), bg, alpha(bg, 0f), Shader.TileMode.CLAMP);
+    private final Shader fadeBottom = new LinearGradient(0, 0, 0, dp(72), alpha(bg, 0f), bg, Shader.TileMode.CLAMP);
+
+    Aurora() { super(act); }
+
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+      rad = Math.max(w, 1) * 0.75f;
+      for (int i = 0; i < 3; i++)
+        sh[i] = new RadialGradient(0, 0, rad, alpha(cols[i], dark ? 0.26f : 0.17f), alpha(cols[i], 0f), Shader.TileMode.CLAMP);
+    }
+
+    void scrolled(int y) { scroll = y; invalidate(); }
+
+    /** Dorongan gerak singkat lalu diam — tidak berputar terus agar hemat baterai. */
+    void drift() {
+      if (!animate) return;
+      if (run != null) run.cancel();
+      final float from = t;
+      run = ValueAnimator.ofFloat(0f, 1f);
+      run.setDuration(2600);
+      run.setInterpolator(new DecelerateInterpolator(1.6f));
+      run.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+        public void onAnimationUpdate(ValueAnimator a) { t = from + 0.9f * (Float) a.getAnimatedValue(); invalidate(); }
+      });
+      run.start();
+    }
+
+    @Override protected void onDetachedFromWindow() { super.onDetachedFromWindow(); if (run != null) run.cancel(); }
+
+    @Override protected void onDraw(Canvas c) {
+      if (sh[0] == null) return;
+      float w = getWidth(), h = getHeight();
+      float[] bx = {0.12f, 0.95f, 0.35f}, by = {0.04f, 0.34f, 0.86f};
+      for (int i = 0; i < 3; i++) {
+        double ang = t * 2.2 + i * 2.1;
+        float x = bx[i] * w + (float) Math.cos(ang) * dp(46), y = by[i] * h + (float) Math.sin(ang) * dp(38) - scroll * (0.05f + 0.04f * i);
+        c.save();
+        c.translate(x, y);
+        p.setShader(sh[i]);
+        c.drawCircle(0, 0, rad, p);
+        c.restore();
+      }
+      // Pudar ke warna latar di tepi atas/bawah agar menyatu dengan bilah status & navigasi sistem (tanpa garis sambungan).
+      p.setShader(fadeTop);
+      c.drawRect(0, 0, w, dp(96), p);
+      c.save();
+      c.translate(0, h - dp(72));
+      p.setShader(fadeBottom);
+      c.drawRect(0, 0, w, dp(72), p);
+      c.restore();
+      p.setShader(null);
+    }
+  }
+
+  /**
+   * Wadah kartu 3D: gradasi, gelembung cahaya yang bergeser berlawanan arah kemiringan (kedalaman/paralaks), dan
+   * kilau yang menyapu. Kemiringan diatur lewat tilt(); rotasi view-nya sendiri diurus pemanggil.
+   */
+  final class Glow extends FrameLayout {
+    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final int a, b;
+    private final float radius;
+    private float tx, ty, shine = -1;
+    private Shader bgShader, shineShader;
+
+    Glow(int a, int b, float radiusDp) {
+      super(act);
+      this.a = a; this.b = b; radius = dp(radiusDp);
+      setWillNotDraw(false);
+      setOutlineProvider(new ViewOutlineProvider() {
+        @Override public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), radius); }
+      });
+      setClipToOutline(true);
+      cam(this);
+    }
+
+    void tilt(float x, float y) { tx = x; ty = y; invalidate(); }
+
+    /** Satu sapuan kilau dari kiri ke kanan. */
+    void sweep() {
+      if (!animate) return;
+      ValueAnimator s = ValueAnimator.ofFloat(0f, 1f);
+      s.setDuration(1100);
+      s.setStartDelay(250);
+      s.setInterpolator(new DecelerateInterpolator(1.4f));
+      s.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+        public void onAnimationUpdate(ValueAnimator v) { shine = (Float) v.getAnimatedValue(); invalidate(); }
+      });
+      s.start();
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+      bgShader = new LinearGradient(0, 0, w, h, new int[]{a, blend(a, b, 0.55f), b}, null, Shader.TileMode.CLAMP);
+      shineShader = new LinearGradient(0, 0, dp(90), 0, new int[]{0x00FFFFFF, 0x38FFFFFF, 0x00FFFFFF}, null, Shader.TileMode.CLAMP);
+    }
+
+    @Override protected void onDraw(Canvas c) {
+      float w = getWidth(), h = getHeight();
+      p.setShader(bgShader);
+      c.drawRect(0, 0, w, h, p);
+      p.setShader(null);
+      float[][] orbs = {{0.86f, 0.10f, 0.42f, 1.0f}, {0.08f, 0.95f, 0.36f, 0.6f}, {0.62f, 0.72f, 0.20f, 1.5f}};
+      for (float[] o : orbs) {
+        p.setColor(0x16FFFFFF);
+        c.drawCircle(o[0] * w - tx * dp(18) * o[3], o[1] * h - ty * dp(18) * o[3], o[2] * w, p);
+      }
+      // Pantulan mengikuti kemiringan: seolah sumber cahaya tetap di tempat.
+      p.setColor(0x14FFFFFF);
+      c.drawCircle(w * (0.5f + tx * 0.5f), h * (0.5f + ty * 0.5f), w * 0.34f, p);
+      if (shine >= 0 && shine < 1) {
+        c.save();
+        c.translate(-dp(120) + shine * (w + dp(200)), 0);
+        c.skew(-0.35f, 0);
+        p.setShader(shineShader);
+        c.drawRect(0, 0, dp(90), h, p);
+        p.setShader(null);
+        c.restore();
+      }
+    }
+  }
+
+  /** Koin 3D yang berputar pada sumbu tegak: muka lonjong mengikuti cos sudut, tebal tepinya mengikuti sin sudut. */
+  final class Coin extends View {
+    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final String symbol;
+    private float angle;
+    private ValueAnimator spin;
+
+    Coin(String symbol) {
+      super(act);
+      this.symbol = symbol == null || symbol.trim().isEmpty() ? "¤" : symbol.trim();
+      p.setTypeface(bold);
+      p.setTextAlign(Paint.Align.CENTER);
+      setContentDescription("Koin");
+    }
+
+    void spin(float turns, long ms) {
+      if (!animate) return;
+      if (spin != null) spin.cancel();
+      final float from = angle % 360f;
+      spin = ValueAnimator.ofFloat(0f, 1f);
+      spin.setDuration(ms);
+      spin.setInterpolator(new DecelerateInterpolator(2.2f));
+      final float total = turns * 360f - from; // selalu berhenti menghadap depan
+      spin.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+        public void onAnimationUpdate(ValueAnimator a) { angle = from + total * (Float) a.getAnimatedValue(); invalidate(); }
+      });
+      spin.start();
+    }
+
+    @Override protected void onAttachedToWindow() { super.onAttachedToWindow(); spin(3, 2200); }
+
+    @Override protected void onDetachedFromWindow() { super.onDetachedFromWindow(); if (spin != null) spin.cancel(); }
+
+    @Override protected void onDraw(Canvas c) {
+      float w = getWidth(), h = getHeight(), r = Math.min(w, h) / 2f - dp(3), cx = w / 2f, cy = h / 2f;
+      double rad = Math.toRadians(angle);
+      float cos = (float) Math.cos(rad), sin = (float) Math.sin(rad);
+      float rx = Math.max(dp(1.2f), r * Math.abs(cos)), edge = r * 0.22f * sin;
+      p.setStyle(Paint.Style.FILL);
+      // Tepi (ketebalan): elips gelap yang digeser, dari belakang ke depan.
+      p.setColor(0xFFB7791F);
+      for (float k = 1f; k > 0; k -= 0.2f) c.drawOval(new RectF(cx - rx - edge * k, cy - r, cx + rx - edge * k, cy + r), p);
+      p.setShader(new LinearGradient(cx - rx, cy - r, cx + rx, cy + r, new int[]{0xFFFFF1B8, 0xFFFBBF4A, 0xFFE89B1C}, null, Shader.TileMode.CLAMP));
+      c.drawOval(new RectF(cx - rx, cy - r, cx + rx, cy + r), p);
+      p.setShader(null);
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeWidth(dp(1.4f));
+      p.setColor(0x99FFFFFF);
+      c.drawOval(new RectF(cx - rx * 0.78f, cy - r * 0.78f, cx + rx * 0.78f, cy + r * 0.78f), p);
+      p.setStyle(Paint.Style.FILL);
+      if (Math.abs(cos) > 0.12f) {
+        c.save();
+        c.scale(Math.abs(cos), 1, cx, cy);
+        p.setColor(0xFF7A4A06);
+        p.setTextSize(r * (symbol.length() > 2 ? 0.6f : symbol.length() > 1 ? 0.8f : 1.05f));
+        c.drawText(symbol, cx, cy - (p.descent() + p.ascent()) / 2, p);
+        c.restore();
+      }
+    }
+  }
 }

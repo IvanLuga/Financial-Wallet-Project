@@ -59,7 +59,19 @@ final class Insights {
     x.recordedDays30 = db.recordedDays(Fmt.addDays(today, -29), today);
     if (range == 0 && bp.equals(Fmt.cycle(today))) x.pace = Control.monthPace(db, s, bp);
     Analytics.insights(r, x);
-    r.health = Analytics.health(r.income, r.expense, x.pace, x.budgetsTotal, x.budgetsOver, x.budgetsNear, x.available, x.avgMonthlyExpense, x.upcoming30, x.recordedDays30);
+    long hInc = r.income, hExp = r.expense;
+    boolean projected = false;
+    if (range == 0 && bp.equals(Fmt.cycle(today)) && r.elapsed < r.days) {
+      // Di tengah siklus, gaji sudah masuk penuh tetapi belanja baru sebagian: rasio tabungan terlihat terlalu bagus.
+      try {
+        Projection.Ctx px = Projection.light(db);
+        if (px.base.lookback >= 14) { hInc = Math.max(r.income, px.me.predInc); hExp = Math.max(r.expense, px.me.predExp); projected = true; }
+      } catch (RuntimeException ignored) {}
+    }
+    for (Model.Debt d : db.debts(true))
+      if (d.direction == 0 && Fmt.validIso(d.due) && d.due.compareTo(Fmt.addDays(today, 30)) <= 0) x.upcoming30 += Math.max(0, d.amount - d.paid);
+    r.health = Analytics.health(hInc, hExp, x.pace, x.budgetsTotal, x.budgetsOver, x.budgetsNear, x.available, x.avgMonthlyExpense, x.upcoming30, x.recordedDays30);
+    if (projected && r.health.notes[0] != null) r.health.notes[0] += " · proyeksi akhir siklus";
 
     int n = range == 3 ? 12 : 6;
     String end = Fmt.cycle(rg[1]);

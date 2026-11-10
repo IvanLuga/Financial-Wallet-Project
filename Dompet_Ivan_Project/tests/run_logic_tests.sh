@@ -4,9 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=$(mktemp -d)
 S=app/src/main/java/id/ivan/dompet
-javac -encoding UTF-8 -d "$OUT" $S/Fmt.java $S/Model.java $S/Analytics.java $S/Forecast.java $S/Simulator.java $S/NotifParser.java $S/CsvImport.java $S/Crypto.java $S/Review.java tests/LogicTest.java tests/ForecastTest.java tests/V4Test.java tests/V5Test.java
+javac -encoding UTF-8 -d "$OUT" $S/Fmt.java $S/Model.java $S/Analytics.java $S/Forecast.java $S/Simulator.java $S/NotifParser.java $S/CsvImport.java $S/Crypto.java $S/Review.java tests/LogicTest.java tests/ForecastTest.java tests/V4Test.java tests/V5Test.java tests/V502Test.java
 java -cp "$OUT" id.ivan.dompet.LogicTest
 java -cp "$OUT" id.ivan.dompet.ForecastTest
 java -cp "$OUT" id.ivan.dompet.V4Test
 java -cp "$OUT" id.ivan.dompet.V5Test
+java -cp "$OUT" id.ivan.dompet.V502Test
 rm -rf "$OUT"
