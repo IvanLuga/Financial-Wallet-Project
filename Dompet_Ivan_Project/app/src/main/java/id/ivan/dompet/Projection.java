@@ -137,7 +137,7 @@ final class Projection {
     long sum = 0;
     for (Model.Goal g : db.goals()) {
       if (g.saved >= g.target || !Fmt.validIso(g.deadline) || g.deadline.compareTo(today) < 0) continue;
-      sum += (g.target - g.saved) / Math.max(1, Analytics.monthsBetween(Fmt.period(today), Fmt.period(g.deadline)));
+      sum += (g.target - g.saved) / Fmt.monthsLeft(today, g.deadline);
     }
     return sum;
   }
@@ -244,7 +244,7 @@ final class Projection {
     ui.pad(seg, 4, 4, 4, 4);
     for (int i = 0; i < names.length; i++) {
       final int v = i;
-      TextView c = ui.label(names[i], 13, selected == i ? Color.WHITE : ui.muted);
+      TextView c = ui.label(names[i], 13, selected == i ? Ui.onColor(ui.primary) : ui.muted);
       c.setGravity(Gravity.CENTER);
       ui.pad(c, 4, 9, 4, 9);
       c.setBackground(selected == i ? ui.round(ui.primary, 50) : ui.ripple(null, Ui.alpha(ui.primary, 0.15f)));
@@ -777,7 +777,8 @@ final class Projection {
   // ---------------- Tahunan ----------------
 
   private void yearlyView(LinearLayout body, final Ctx c) {
-    final Forecast.Yearly y = Forecast.yearly(c.txs, c.me, c.monthly, c.today, c.available, c.incGrowth, c.inflation, c.ret, yearsAhead, fiMultiple(db));
+    final long[] rest = Forecast.restOfMonth(c.base, c.items, c.today);
+    final Forecast.Yearly y = Forecast.yearly(c.txs, rest[0], rest[1], c.monthly, c.today, c.available, c.incGrowth, c.inflation, c.ret, yearsAhead, fiMultiple(db));
     LinearLayout hero = ui.card(body);
     hero.setBackground(ui.gradient(ui.heroA, ui.heroB, 24));
     hero.addView(ui.caps("Proyeksi akhir tahun " + y.year, 0xFFB8E3DA));
@@ -1091,7 +1092,7 @@ final class Projection {
       ui.click(sign, new Runnable() {
         public void run() {
           neg[0] = !neg[0];
-          sign.setTextColor(neg[0] ? Color.WHITE : ui.text);
+          sign.setTextColor(neg[0] ? Ui.onColor(ui.red) : ui.text);
           sign.setBackground(ui.ripple(neg[0] ? ui.round(ui.red, 50) : ui.stroke(ui.surface, ui.divider, 50), Ui.alpha(ui.red, 0.25f)));
         }
       });

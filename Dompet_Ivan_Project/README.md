@@ -6,6 +6,31 @@ The app's interface is in Indonesian. In this document, in-app labels are shown 
 
 Home-screen name: **Dompet Ivan** (short enough not to be cut off). Inside the app, in PDFs, and in backups: **Dompet Ivan v5.0**.
 
+## 5.0.2 (interface redesign + calculation review)
+
+Version 5.0.2, version code **9**. Install `Dompet_Ivan_v5.0.2.apk` over any older version with **Update**. No database changes (still schema 6), same signing certificate.
+
+### New interface
+- **3D balance card styled like a bank debit card** on Home: solid deep colour, a wavy accent band, fine concentric-circle pattern, a gold EMV-style chip with contactless symbol, a glossy layer and a shiny rim. Three styles, chosen by **long-pressing** the card: **Biru Samudra** (deep blue + gold wave), **Toska Senja** (teal + orange wave), **Obsidian** (matte black + silver). Original design inspired by Indonesian bank cards, not a copy of any bank's card. Drag a finger across it to tilt it in 3D, tap to flip it to the back (magnetic stripe, cycle breakdown and 30-day balance line). The gold coin on the card opens accounts. When you scroll, the card leans back and fades into the distance.
+- **Quick actions** under the card: **Catat**, **Akun**, **Template**, **Rapor**, **Cari**.
+- **Floating navigation bar** with a sliding marker and a raised **+** button (long-press it for templates). The **+** sits over its own gap between **Wawasan** and **Proyeksi** (an early 5.0.2 build centred it on the screen, so it covered **Proyeksi**). The header now has an avatar with your initials that opens the menu; the `•••` button still works.
+- **Aurora background and glass cards**, a new deeper colour palette for both light and dark themes, gradient buttons and progress bars.
+- **3D motion everywhere**: screens swing in like a door when you change tabs, cards stand up as they appear, wide cards tilt toward your finger when pressed, and the category chart in **Wawasan** is now a tilted **3D doughnut** whose selected slice lifts up.
+- The lock screen uses the spinning coin as its logo.
+- All of it follows the existing **Matikan animasi** switch in the menu: with animations off, nothing moves or tilts.
+
+### Calculation fixes
+- **"Saldo awal" (opening balance) is no longer counted as income** in reports, the savings rate, the health score, the Home "Masuk" figure, monthly charts and the weekly/monthly report. Before, recording Rp10m of existing money as an opening balance made that month look like a 90% savings rate. It is now shown as its own note; search-result totals still include it.
+- **Spending pace no longer multiplies one-off big purchases.** The end-of-cycle projection used to be "spent so far ÷ share of the month elapsed", so paying rent on day 3 projected ten rents and raised a false **Boros** status. Transactions at or above your "unusual transaction" threshold are now counted once, and only ordinary spending is extrapolated.
+- **Health score mid-cycle**: the savings-rate part used income and expenses so far, which looks far too good right after payday. For the running cycle it now uses the projected end-of-cycle income and expenses (once there are 14+ days of history). The "obligations in 30 days" part now also counts debts you owe that fall due, not only bills.
+- **Yearly projection with a payday cycle**: the rest of the current month was taken from the pay cycle (for example up to the 24th of next month) and then the whole next calendar month was added on top, counting up to a month twice (or skipping a few days). It now uses the rest of the calendar month.
+- **Goal "per month" amount**: months left were counted from month names, so 1 Nov → 31 Dec was "1 month" and the required monthly deposit showed double. It is now based on the number of days. The same figure feeds "safe to spend".
+- **Busiest weekday**: future-dated transactions were added to the total but not to the number of days, inflating that weekday's average.
+
+### Tests
+- `tests/V502Test.java`: 22 checks for the fixes above (run by `tests/run_logic_tests.sh`).
+- `tests/run_ui_smoke.sh` (new): opens every tab, sub-tab and main sheet on the JVM with Robolectric, checks that the **+** button sits over its gap at three screen sizes, renders all three card styles, in light and dark themes, with and without animations and with empty data, then measures, lays out and draws the whole view tree. It catches crashes without a phone; it does not judge how the screens look. Needs JDK 8 and Maven; the libraries are downloaded once to `tests/ui/lib` (not committed).
+
 ## 5.0.1 (small update)
 - New launcher icon from the "Digital Wallet v5.0 · Keep Your Money" logo (adaptive icon for Android 8+, rounded icon for older versions). Source image and generator: `art/logo.jpg`, `art/make_icons.py`.
 - Version 5.0.1, version code **8**: install `Dompet_Ivan_v5.0.1.apk` over 5.0 (or older) with **Update**. No database or feature changes.
@@ -245,6 +270,6 @@ python3 tests/check_schema.py
 bash tests/run_logic_tests.sh
 ```
 
-The output is `Dompet_Ivan_v5.0.1.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
+The output is `Dompet_Ivan_v5.0.2.apk`. With the official Android SDK, set `ANDROID_JAR=/path/sdk/platforms/android-35/android.jar` (the code stays compatible with API 23). For the next update, increase `versionCode` in `AndroidManifest.xml`, `build.sh`, and `MainActivity.VERSION_CODE`.
 
 Coding rules: **don't use lambdas or method references**, because `dx` doesn't desugar them. Don't call APIs above level 23 directly; use `Build.VERSION.SDK_INT` checks and reflection.

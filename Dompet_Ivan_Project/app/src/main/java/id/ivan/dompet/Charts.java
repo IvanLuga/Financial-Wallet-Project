@@ -80,7 +80,7 @@ final class Charts {
       float h = dp(8) + lines.length * dp(16);
       float left = Math.max(0, Math.min(getWidth() - w, cx - w / 2));
       p.setStyle(Paint.Style.FILL);
-      p.setColor(ui.dark ? 0xFF2B3E47 : 0xFF15252E);
+      p.setColor(ui.dark ? 0xFF2A3654 : 0xFF101828);
       c.drawRoundRect(new RectF(left, top, left + w, top + h), dp(9), dp(9), p);
       p.setTextAlign(Paint.Align.LEFT);
       for (int i = 0; i < lines.length; i++) {
@@ -123,13 +123,20 @@ final class Charts {
 
     @Override protected void onMeasure(int w, int h) { setMeasuredDimension(MeasureSpec.getSize(w), (int) dp(210)); }
 
+    /** Kemiringan 3D: 1 = datar (dilihat dari atas), 0,6 = rebah. Mulai datar lalu merebah saat muncul. */
+    float squash() { return 1f - 0.4f * reveal; }
+
+    float depth() { return dp(15) * reveal; }
+
+    float centerY() { return getHeight() / 2f - depth() / 2f; }
+
     @Override public boolean onTouchEvent(MotionEvent e) {
       if (e.getAction() == MotionEvent.ACTION_DOWN) return true;
       if (e.getAction() != MotionEvent.ACTION_UP || total == 0) return super.onTouchEvent(e);
-      float cx = getWidth() / 2f, cy = getHeight() / 2f;
-      double dx = e.getX() - cx, dy = e.getY() - cy;
+      float cx = getWidth() / 2f, cy = centerY();
+      double dx = e.getX() - cx, dy = (e.getY() - cy) / squash(); // kembalikan ke bidang cincin yang belum direbahkan
       double dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < dp(40)) { select((selected + 1) % labels.length); performClick(); return true; }
+      if (dist < dp(48)) { select((selected + 1) % labels.length); performClick(); return true; }
       double ang = Math.toDegrees(Math.atan2(dy, dx)) + 90;
       if (ang < 0) ang += 360;
       double acc = 0;
@@ -143,38 +150,58 @@ final class Charts {
 
     @Override public boolean performClick() { return super.performClick(); }
 
-    @Override protected void onDraw(Canvas c) {
-      float cx = getWidth() / 2f, cy = getHeight() / 2f, r = dp(76);
-      RectF oval = new RectF(cx - r, cy - r, cx + r, cy + r);
-      p.setStyle(Paint.Style.STROKE);
-      p.setStrokeCap(Paint.Cap.BUTT);
-      p.setStrokeWidth(dp(20));
-      p.setColor(ui.surface2);
-      c.drawOval(oval, p);
+    /** Satu lapis cincin pada ketinggian tertentu; lapis bawah digelapkan sebagai dinding samping. */
+    private void ring(Canvas c, float cx, float cy, float r, float k, float dy, float shade, boolean top) {
+      RectF oval = new RectF(-r, -r, r, r);
       float start = -90;
       for (int i = 0; i < values.length; i++) {
         float sweep = (float) (values[i] * 360d / Math.max(1, total));
-        p.setColor(colors[i % colors.length]);
-        p.setStrokeWidth(i == selected ? dp(20 + 8 * sel) : dp(20));
-        p.setAlpha(i == selected || labels.length == 1 ? 255 : 200);
+        boolean on = i == selected && labels.length > 1;
+        int col = colors[i % colors.length];
+        p.setColor(shade > 0 ? Ui.blend(col, 0xFF000000, shade) : col);
+        p.setStrokeWidth(dp(22));
+        p.setAlpha(top && !on && labels.length > 1 ? 225 : 255);
         float drawn = Math.max(0, sweep * reveal - (values.length > 1 ? 1.6f : 0));
+        c.save();
+        c.translate(cx, cy + dy - (on ? dp(9) * sel : 0)); // irisan terpilih terangkat
+        c.scale(1, k);
         c.drawArc(oval, start, drawn, false, p);
+        c.restore();
         start += sweep * reveal;
       }
       p.setAlpha(255);
-      p.setStyle(Paint.Style.FILL);
-      p.setTextAlign(Paint.Align.CENTER);
+    }
+
+    @Override protected void onDraw(Canvas c) {
+      float cx = getWidth() / 2f, cy = centerY(), r = dp(80), k = squash(), depth = depth();
+      p.setStyle(Paint.Style.STROKE);
+      p.setStrokeCap(Paint.Cap.BUTT);
       if (total == 0) {
+        p.setStrokeWidth(dp(22));
+        p.setColor(ui.surface2);
+        c.save(); c.translate(cx, cy); c.scale(1, k); c.drawOval(new RectF(-r, -r, r, r), p); c.restore();
+        p.setStyle(Paint.Style.FILL);
+        p.setTextAlign(Paint.Align.CENTER);
         p.setColor(ui.muted); p.setTextSize(dp(13));
         c.drawText("Belum ada data", cx, cy + dp(5), p);
         return;
       }
-      p.setColor(ui.text); p.setTextSize(dp(26)); p.setTypeface(ui.bold);
-      c.drawText(Math.round(values[selected] * 100d / total) + "%", cx, cy + dp(2), p);
+      // Bayangan lantai, lalu dinding (lapis demi lapis dari bawah), lalu permukaan atas.
+      p.setStyle(Paint.Style.FILL);
+      p.setColor(ui.dark ? 0x40000000 : 0x1A101828);
+      c.drawOval(new RectF(cx - r * 1.05f, cy + depth + r * k * 0.82f, cx + r * 1.05f, cy + depth + r * k * 1.18f), p);
+      p.setStyle(Paint.Style.STROKE);
+      float step = Math.max(1f, dp(1.5f));
+      for (float d = depth; d >= step; d -= step) ring(c, cx, cy, r, k, d, 0.38f, false);
+      ring(c, cx, cy, r, k, 0, 0, true);
+      p.setStyle(Paint.Style.FILL);
+      p.setTextAlign(Paint.Align.CENTER);
+      p.setColor(ui.text); p.setTextSize(dp(22)); p.setTypeface(ui.bold);
+      c.drawText(Math.round(values[selected] * 100d / total) + "%", cx, cy + dp(3), p);
       p.setTypeface(ui.medium);
-      p.setTextSize(dp(11)); p.setColor(ui.muted);
+      p.setTextSize(dp(10.5f)); p.setColor(ui.muted);
       String l = labels[selected];
-      c.drawText(l.length() > 16 ? l.substring(0, 15) + "…" : l, cx, cy + dp(20), p);
+      c.drawText(l.length() > 14 ? l.substring(0, 13) + "…" : l, cx, cy + dp(18), p);
     }
   }
 

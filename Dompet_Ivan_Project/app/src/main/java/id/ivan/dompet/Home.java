@@ -2,6 +2,7 @@ package id.ivan.dompet;
 
 import android.graphics.Color;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -35,13 +36,15 @@ final class Home {
   }
 
   void build(LinearLayout body) {
+    heroView = null;
     if (results != null) { buildResults(body); return; }
     String period = a.period, today = Fmt.today();
     ArrayList<Tx> month = db.month(period);
-    long inc = Analytics.sum(month, Model.INCOME), exp = Analytics.sum(month, Model.EXPENSE);
+    long inc = Analytics.income(month), exp = Analytics.sum(month, Model.EXPENSE);
     long total = db.total(), reserved = db.totalSaved();
 
     hero(body, total, reserved, inc, exp);
+    actions(body);
     inboxCard(body);
     if (period.equals(Fmt.cycle(today))) wrapCard(body, today);
     if (period.equals(Fmt.cycle(today))) a.projection.safeCard(body);
@@ -54,41 +57,243 @@ final class Home {
     transactions(body, month, period);
   }
 
-  private void hero(LinearLayout body, long total, long reserved, long inc, long exp) {
-    LinearLayout hero = ui.card(body);
-    hero.setBackground(ui.gradient(ui.heroA, ui.heroB, 26));
-    hero.setElevation(ui.dp(4));
-    ui.pad(hero, 20, 18, 20, 18);
-    LinearLayout top = ui.row();
-    hero.addView(top);
-    LinearLayout left = ui.col();
-    top.addView(left, Ui.weight(1));
-    left.addView(ui.caps("Total saldo", 0xFFB8E3DA));
-    final TextView amount = ui.title(a.money(total), 30);
-    amount.setTextColor(Color.WHITE);
-    left.addView(amount);
-    if (!a.hide) ui.countUp(amount, total, a.moneyF);
-    left.addView(ui.text("Tersedia setelah target: " + a.money(total - reserved), 12, 0xFFC9ECE4));
-    Charts.Spark spark = new Charts.Spark(ui, balanceTrend(total, 30), 0xCCFFFFFF);
-    top.addView(spark, Ui.lp(ui.dp(92), ui.dp(48)));
-    ui.gap(hero, 14);
-    LinearLayout pills = ui.row();
-    hero.addView(pills);
-    pills.addView(heroPill("↑ Masuk", inc, 0xFF9BF0C9), Ui.weight(1));
-    ui.hgap(pills, 10);
-    pills.addView(heroPill("↓ Keluar", exp, 0xFFFFB4AC), Ui.weight(1));
-    ui.click(hero, new Runnable() { public void run() { a.forms.accounts(); } });
+  /** Kartu saldo saat ini (untuk paralaks gulir); null di layar lain. */
+  private View heroView;
+  private boolean heroBack;
+
+  /** Saat digulir, kartu saldo merebah ke belakang (rotasi X), mengecil, dan memudar — seperti menjauh ke kedalaman. */
+  void parallax(int y) {
+    if (heroView == null || !ui.animate || !heroView.isAttachedToWindow()) return;
+    float f = Math.max(0f, Math.min(1f, y / (float) ui.dp(260)));
+    heroView.setRotationX(-22f * f);
+    heroView.setScaleX(1f - 0.08f * f);
+    heroView.setScaleY(1f - 0.08f * f);
+    heroView.setAlpha(1f - 0.6f * f);
   }
 
-  private LinearLayout heroPill(String label, long v, int color) {
-    LinearLayout p = ui.col();
-    p.setBackground(ui.round(0x22FFFFFF, 14));
-    ui.pad(p, 12, 8, 12, 8);
-    p.addView(ui.label(label + " · " + Fmt.monthShort(a.period), 11, color));
-    TextView t = ui.label(a.money(v), 15, Color.WHITE);
-    t.setSingleLine(true);
-    p.addView(t);
-    return p;
+  /**
+   * Kartu saldo 3D bergaya kartu debit (5.0.2): geser jari untuk memiringkan, ketuk untuk membalik ke rincian
+   * siklus, tahan untuk ganti gaya kartu. Koin berputar = pintasan ke akun.
+   */
+  private void hero(LinearLayout body, final long total, final long reserved, final long inc, final long exp) {
+    int style = Math.max(0, Math.min(Ui.BankCard.STYLES - 1, a.prefs.getInt("card_style", 0)));
+    final Ui.BankCard hero = ui.new BankCard(style, 20);
+    hero.setElevation(ui.dp(14));
+    LinearLayout.LayoutParams hp = Ui.lp(Ui.MATCH, Ui.WRAP);
+    hp.leftMargin = ui.dp(2); hp.rightMargin = ui.dp(2);
+    body.addView(hero, hp);
+    heroView = hero;
+    heroBack = false;
+    final int soft = 0xD9FFFFFF;
+
+    final LinearLayout front = ui.col(), back = ui.col();
+    ui.pad(front, 22, 18, 20, 16);
+    ui.pad(back, 22, 74, 22, 16);
+    hero.addView(front, new FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH));
+    hero.addView(back, new FrameLayout.LayoutParams(Ui.MATCH, Ui.MATCH));
+    back.setVisibility(View.INVISIBLE);
+
+    // --- Sisi depan
+    LinearLayout top = ui.row();
+    front.addView(top);
+    android.text.SpannableStringBuilder brand = new android.text.SpannableStringBuilder("dompet");
+    int st = brand.length();
+    brand.append("ivan");
+    brand.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), st, brand.length(), 0);
+    brand.setSpan(new android.text.style.ForegroundColorSpan(hero.accent()), st, brand.length(), 0);
+    TextView brandView = ui.text("", 18, Color.WHITE);
+    brandView.setText(brand);
+    brandView.setTypeface(android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.ITALIC));
+    top.addView(brandView, Ui.weight(1));
+    TextView kind = ui.caps("Debit · Pribadi", soft);
+    kind.setTextSize(9.5f);
+    top.addView(kind);
+    ui.gap(front, 12);
+    front.addView(ui.new Chip(), Ui.lp(ui.dp(90), ui.dp(32)));
+    ui.gap(front, 10);
+    front.addView(ui.caps("Total saldo", hero.accent()));
+    final TextView amount = ui.title(a.money(total), 27);
+    amount.setTextColor(Color.WHITE);
+    amount.setSingleLine(true);
+    amount.setShadowLayer(ui.dp(3), 0, ui.dp(1), 0x66000000);
+    front.addView(amount);
+    if (!a.hide) ui.countUp(amount, total, a.moneyF);
+    TextView avail = ui.text("Tersedia setelah target: " + a.money(total - reserved), 11.5f, soft);
+    avail.setSingleLine(true);
+    front.addView(avail);
+    front.addView(new View(a), new LinearLayout.LayoutParams(1, 0, 1f));
+    ui.gap(front, 10);
+    LinearLayout bottom = ui.row();
+    bottom.setGravity(Gravity.BOTTOM);
+    front.addView(bottom);
+    LinearLayout holder = ui.col();
+    bottom.addView(holder, Ui.weight(1));
+    String name = db.setting("name", "").trim();
+    TextView nameView = ui.label((name.isEmpty() ? "Dompet Ivan" : name).toUpperCase(), 14, Color.WHITE);
+    nameView.setLetterSpacing(0.12f);
+    nameView.setSingleLine(true);
+    holder.addView(nameView);
+    TextView flow = ui.text("↑ " + compact(inc) + "   ↓ " + compact(exp) + "   · " + Fmt.monthShort(a.period), 11.5f, soft);
+    flow.setSingleLine(true);
+    holder.addView(flow);
+    final Ui.Coin coin = ui.new Coin(Fmt.cur.symbol);
+    coin.setContentDescription("Kelola akun & dompet");
+    bottom.addView(coin, Ui.lp(ui.dp(46), ui.dp(46)));
+    ui.click(coin, new Runnable() { public void run() { coin.spin(2, 900); a.forms.accounts(); } });
+
+    // --- Sisi belakang (di bawah pita magnetik)
+    back.addView(ui.caps("Rincian " + Fmt.monthName(a.period), hero.accent()));
+    ui.gap(back, 4);
+    heroLine(back, "Pemasukan", a.money(inc));
+    heroLine(back, "Pengeluaran", a.money(exp));
+    heroLine(back, "Selisih", a.signed(inc - exp));
+    heroLine(back, "Disisihkan untuk target", a.money(reserved));
+    heroLine(back, "Rasio tabungan", inc > 0 ? Fmt.pct(Math.max(-9.99, (double) (inc - exp) / inc)) : "—");
+    Charts.Spark spark = new Charts.Spark(ui, balanceTrend(total, 30), 0xDDFFFFFF);
+    LinearLayout.LayoutParams sp = Ui.lp(Ui.MATCH, ui.dp(30));
+    sp.topMargin = ui.dp(6);
+    back.addView(spark, sp);
+    TextView sparkNote = ui.text("Saldo 30 hari terakhir", 10.5f, soft);
+    back.addView(sparkNote);
+
+    TextView hint = ui.text("Ketuk: balik kartu  ·  geser: miringkan  ·  tahan: ganti gaya", 11, ui.faint);
+    hint.setGravity(Gravity.CENTER);
+    ui.pad(hint, 0, 8, 0, 0);
+    LinearLayout.LayoutParams hip = Ui.lp(Ui.MATCH, Ui.WRAP);
+    hip.bottomMargin = ui.dp(12);
+    body.addView(hint, hip);
+
+    final Runnable flip = new Runnable() {
+      public void run() {
+        final boolean toBack = !heroBack;
+        heroBack = toBack;
+        hero.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+        final Runnable swap = new Runnable() {
+          public void run() {
+            front.setVisibility(toBack ? View.INVISIBLE : View.VISIBLE);
+            back.setVisibility(toBack ? View.VISIBLE : View.INVISIBLE);
+            hero.setBack(toBack);
+          }
+        };
+        if (!ui.animate) { swap.run(); return; }
+        hero.animate().rotationY(90).rotationX(0).setDuration(170).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(new Runnable() {
+          public void run() {
+            swap.run();
+            hero.setRotationY(-90);
+            hero.sweep();
+            hero.animate().rotationY(0).setDuration(320).setInterpolator(new android.view.animation.OvershootInterpolator(1.4f)).start();
+          }
+        }).start();
+      }
+    };
+    final Runnable pickStyle = new Runnable() { public void run() { cardStyle(); } };
+    hero.setClickable(true);
+    hero.setLongClickable(true);
+    hero.setContentDescription("Kartu saldo. Total " + a.money(total) + ". Ketuk untuk melihat rincian, tahan untuk ganti gaya kartu.");
+    hero.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { flip.run(); } });
+    hero.setOnLongClickListener(new View.OnLongClickListener() { public boolean onLongClick(View v) { pickStyle.run(); return true; } });
+    final float slop = android.view.ViewConfiguration.get(a).getScaledTouchSlop();
+    final long longMs = android.view.ViewConfiguration.getLongPressTimeout();
+    hero.setOnTouchListener(new View.OnTouchListener() {
+      float dx, dy;
+      boolean moved, longFired;
+      final Runnable longPress = new Runnable() {
+        public void run() { longFired = true; hero.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); pickStyle.run(); }
+      };
+      public boolean onTouch(View v, android.view.MotionEvent e) {
+        switch (e.getActionMasked()) {
+          case android.view.MotionEvent.ACTION_DOWN:
+            dx = e.getX(); dy = e.getY(); moved = false; longFired = false;
+            v.postDelayed(longPress, longMs);
+            return true;
+          case android.view.MotionEvent.ACTION_MOVE:
+            if (!moved && (Math.abs(e.getX() - dx) > slop || Math.abs(e.getY() - dy) > slop)) { moved = true; v.removeCallbacks(longPress); }
+            if (moved && ui.animate) {
+              float fx = Math.max(-1, Math.min(1, e.getX() / Math.max(1, v.getWidth()) * 2 - 1)), fy = Math.max(-1, Math.min(1, e.getY() / Math.max(1, v.getHeight()) * 2 - 1));
+              v.setRotationY(fx * 11f);
+              v.setRotationX(-fy * 9f);
+              hero.tilt(fx, fy);
+            }
+            return true;
+          case android.view.MotionEvent.ACTION_UP:
+            v.removeCallbacks(longPress);
+            if (!moved && !longFired) { v.performClick(); return true; }
+            // lanjut: kembali tegak
+          case android.view.MotionEvent.ACTION_CANCEL:
+            v.removeCallbacks(longPress);
+            hero.tilt(0, 0);
+            if (ui.animate) v.animate().rotationX(0).rotationY(0).setDuration(420).setInterpolator(new android.view.animation.OvershootInterpolator(2.5f)).start();
+            return true;
+          default: return false;
+        }
+      }
+    });
+    if (ui.animate) {
+      hero.setAlpha(0f);
+      hero.setRotationX(-28f);
+      hero.setScaleX(0.9f); hero.setScaleY(0.9f);
+      hero.animate().alpha(1f).rotationX(0).scaleX(1f).scaleY(1f).setDuration(560).setInterpolator(new android.view.animation.OvershootInterpolator(1.3f)).start();
+      hero.sweep();
+    }
+  }
+
+  private String compact(long v) { return a.hide ? Fmt.masked() : Fmt.compact(v); }
+
+  /** Pilihan gaya kartu saldo (tersimpan di preferensi tampilan). */
+  void cardStyle() {
+    final Ui.Sheet s = ui.sheet("Gaya kartu saldo", "Terinspirasi kartu debit bank, dengan warna dan motif sendiri");
+    int cur = a.prefs.getInt("card_style", 0);
+    String[] icons = {"🔷", "🔶", "⬛"};
+    for (int i = 0; i < Ui.BankCard.STYLES; i++) {
+      final int v = i;
+      s.item(icons[i], Ui.CARD_NAMES[i] + (cur == i ? "  ✓" : ""), Ui.CARD_NOTES[i], ui.primary, new Runnable() {
+        public void run() { a.prefs.edit().putInt("card_style", v).apply(); a.render(false); }
+      });
+    }
+    s.show();
+  }
+
+  private void heroLine(LinearLayout box, String left, String right) {
+    LinearLayout r = ui.row();
+    ui.pad(r, 0, 2, 0, 2);
+    r.addView(ui.text(left, 12.5f, 0xD9FFFFFF), Ui.weight(1));
+    TextView v = ui.label(right, 13.5f, Color.WHITE);
+    v.setSingleLine(true);
+    r.addView(v);
+    box.addView(r);
+  }
+
+  /** Deretan aksi cepat di bawah kartu saldo (5.0.2): hal yang paling sering dicari, satu ketukan. */
+  private void actions(LinearLayout body) {
+    LinearLayout row = ui.row();
+    Object[][] items = {
+      {"＋", "Catat", ui.primary, new Runnable() { public void run() { a.forms.tx(null); } }},
+      {"👛", "Akun", ui.blue, new Runnable() { public void run() { a.forms.accounts(); } }},
+      {"⚡", "Template", ui.gold, new Runnable() { public void run() { a.forms.templates(); } }},
+      {"🎁", "Rapor", ui.purple, new Runnable() { public void run() { a.wrapped.showWeek(); } }},
+      {"🔍", "Cari", ui.green, new Runnable() { public void run() { a.forms.search(); } }},
+    };
+    for (int i = 0; i < items.length; i++) {
+      LinearLayout cell = ui.col();
+      cell.setGravity(Gravity.CENTER_HORIZONTAL);
+      int color = (Integer) items[i][2];
+      TextView ic = ui.label((String) items[i][0], 19, color);
+      ic.setGravity(Gravity.CENTER);
+      ic.setIncludeFontPadding(false);
+      ic.setBackground(ui.dark ? ui.stroke(ui.soft(color), Ui.alpha(color, 0.35f), 18) : ui.round(ui.soft(color), 18));
+      cell.addView(ic, Ui.lp(ui.dp(52), ui.dp(52)));
+      TextView l = ui.label((String) items[i][1], 11.5f, ui.muted);
+      l.setGravity(Gravity.CENTER);
+      ui.pad(l, 0, 6, 0, 0);
+      cell.addView(l);
+      cell.setContentDescription((String) items[i][1]);
+      ui.click(cell, (Runnable) items[i][3]);
+      row.addView(cell, Ui.weight(1));
+      ui.enter(cell, i + 1);
+    }
+    LinearLayout.LayoutParams p = Ui.lp(Ui.MATCH, Ui.WRAP);
+    p.bottomMargin = ui.dp(16);
+    body.addView(row, p);
   }
 
   /** Saldo total di akhir setiap hari selama n hari terakhir (untuk sparkline). */
@@ -144,10 +349,12 @@ final class Home {
   private void accounts(LinearLayout body) {
     ArrayList<Account> list = db.accounts(false);
     LinearLayout strip = ui.row();
-    ui.pad(strip, 0, 0, 0, 2);
+    ui.pad(strip, 2, 2, 0, 6);
     for (final Account x : list) {
       LinearLayout c = ui.col();
-      c.setBackground(ui.ripple(ui.dark ? ui.stroke(ui.surface, ui.divider, 18) : ui.round(ui.surface, 18), Ui.alpha(ui.primary, 0.15f)));
+      c.setBackground(ui.ripple(ui.dark ? ui.stroke(Ui.alpha(ui.surface, 0.88f), Ui.alpha(0xFFFFFFFF, 0.09f), 20) : ui.round(ui.surface, 20), Ui.alpha(ui.primary, 0.15f)));
+      if (!ui.dark) c.setElevation(ui.dp(1.5f));
+      c.setMinimumWidth(ui.dp(128));
       ui.pad(c, 14, 12, 18, 12);
       LinearLayout r = ui.row();
       TextView ic = ui.text(x.icon.isEmpty() ? "💳" : x.icon, 16, ui.text);

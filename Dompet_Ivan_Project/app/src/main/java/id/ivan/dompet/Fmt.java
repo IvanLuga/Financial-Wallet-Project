@@ -405,6 +405,12 @@ final class Fmt {
   /** Rentang [from, to] tepat satu siklus penuh atau lebih. */
   static boolean wholeCycles(String from, String to) { return from.equals(cycleStart(cycle(from))) && to.equals(cycleEnd(cycle(to))); }
 
+  /**
+   * Bulan tersisa sampai tenggat, dari jumlah hari (min. 1). Selisih nama bulan saja keliru: 1 Nov → 31 Des
+   * terhitung "1 bulan" padahal 2, sehingga setoran per bulan tampak dua kali lipat.
+   */
+  static int monthsLeft(String today, String deadline) { return Math.max(1, (int) Math.round(daysBetween(today, deadline) / 30.4375)); }
+
   static String monthStart(String period) { return period + "-01"; }
 
   static String monthEnd(String period) { return period + "-" + pad2(daysInMonth(period)); }

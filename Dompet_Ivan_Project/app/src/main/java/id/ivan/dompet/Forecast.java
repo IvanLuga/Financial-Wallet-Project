@@ -723,6 +723,28 @@ final class Forecast {
    * dari model bulanan; tahun berikutnya tumbuh sesuai asumsi. Imbal hasil hanya untuk saldo positif.
    */
   static Yearly yearly(List<Tx> txs, MonthEnd me, Monthly m, String today, long opening, double incGrowth, double inflation, double ret, int years, double fiMultiple) {
+    return yearly(txs, me == null ? 0 : me.restInc, me == null ? 0 : me.restExp, m, today, opening, incGrowth, inflation, ret, years, fiMultiple);
+  }
+
+  /**
+   * Perkiraan arus dari besok sampai akhir bulan KALENDER: {masuk, keluar}. Prediksi bulanan memakai bulan kalender,
+   * jadi sisa siklus gajian (yang bisa berakhir tgl 24 atau melewati akhir bulan) tidak boleh dipakai untuk tahunan:
+   * hari-harinya akan terhitung dua kali atau terlewat.
+   */
+  static long[] restOfMonth(Base b, List<Item> items, String today) {
+    String end = Fmt.monthEnd(Fmt.period(today));
+    long inc = 0, exp = 0;
+    int n = Fmt.daysBetween(today, end);
+    for (int i = 1; i <= n; i++) exp += b.expPerDay(Fmt.addDays(today, i));
+    inc += b.irregularInc * n;
+    if (items != null) for (Item it : items) {
+      if (it.date.compareTo(today) <= 0 || it.date.compareTo(end) > 0) continue;
+      if (it.type == Model.INCOME) inc += it.amount; else exp += it.amount;
+    }
+    return new long[]{inc, exp};
+  }
+
+  static Yearly yearly(List<Tx> txs, long restInc, long restExp, Monthly m, String today, long opening, double incGrowth, double inflation, double ret, int years, double fiMultiple) {
     Yearly y = new Yearly();
     y.year = Integer.parseInt(today.substring(0, 4));
     String yStart = y.year + "-01-01", prevStart = (y.year - 1) + "-01-01", prevEnd = (y.year - 1) + "-12-31";
@@ -735,8 +757,8 @@ final class Forecast {
     }
     y.hasLast = y.lastInc > 0 || y.lastExp > 0;
     y.lastPartial = first != null && first.compareTo((y.year - 1) + "-01-31") > 0;
-    y.predInc = y.ytdInc + (me == null ? 0 : me.restInc);
-    y.predExp = y.ytdExp + (me == null ? 0 : me.restExp);
+    y.predInc = y.ytdInc + restInc;
+    y.predExp = y.ytdExp + restExp;
     if (m != null) for (int i = 0; i < m.periods.length; i++) {
       if (!m.periods[i].startsWith(Integer.toString(y.year))) continue;
       y.predInc += m.inc[i]; y.predExp += m.exp[i];
